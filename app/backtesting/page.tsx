@@ -21,7 +21,7 @@ export default function BacktestingPage() {
       .select('ai_name')
     
     if (data) {
-      const unique = Array.from(new Set(data.map(d => d.ai_name)))
+      const unique = Array.from(new Set(data.map((d: any) => d.ai_name)))
       setAiOptions(['all', ...unique])
     }
   }
