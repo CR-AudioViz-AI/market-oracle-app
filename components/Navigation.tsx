@@ -25,7 +25,7 @@ export default function Navigation() {
   const pathname = usePathname()
 
   return (
-    <nav className="bg-gradient-to-r from-[#003366] via-slate-900 to-[#003366] border-b-2 border-[#00CED1]/30 sticky top-0 z-50 shadow-lg shadow-[#00CED1]/20">
+    <nav className="bg-white border-b fixed top-0 left-0 right-0 z-[9999] shadow-sm">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-20">
           <Link href="/" className="flex items-center space-x-3">
