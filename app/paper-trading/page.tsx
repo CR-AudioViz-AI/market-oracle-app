@@ -6,25 +6,79 @@ import { supabase } from '@/lib/supabase'
 export default function PaperTradingPage() {
   const [balance, setBalance] = useState(10000)
   const [positions, setPositions] = useState<any[]>([])
-  const [availablePicks, setAvailablePicks] = useState<any[]>([])
+  const [availablePicks, setAvailablePicks] = useState<any[]>([]
+
+)
+  const [filteredPicks, setFilteredPicks] = useState<any[]>([])
   const [selectedStock, setSelectedStock] = useState<any>(null)
   const [quantity, setQuantity] = useState(1)
-  const [totalValue, setTotalValue] = useState(10000)
+  
+  // Filter states
+  const [selectedAI, setSelectedAI] = useState('all')
+  const [minConfidence, setMinConfidence] = useState(0)
+  const [sortBy, setSortBy] = useState('confidence')
+  const [showAll, setShowAll] = useState(false)
+  const [aiOptions, setAiOptions] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetchData()
   }, [])
 
+  useEffect(() => {
+    applyFilters()
+  }, [availablePicks, selectedAI, minConfidence, sortBy])
+
   async function fetchData() {
     const { data } = await supabase
       .from('stock_picks')
       .select('*')
-      .gte('confidence_score', 70)
-      .limit(20)
 
     if (data) {
       setAvailablePicks(data)
+      
+      // Extract unique AI names
+      const unique = Array.from(new Set(data.map(d => d.ai_name)))
+      setAiOptions(['all', ...unique])
     }
+    setLoading(false)
+  }
+
+  function applyFilters() {
+    let filtered = [...availablePicks]
+    
+    // Filter by AI
+    if (selectedAI !== 'all') {
+      filtered = filtered.filter(pick => pick.ai_name === selectedAI)
+    }
+    
+    // Filter by confidence
+    filtered = filtered.filter(pick => pick.confidence_score >= minConfidence)
+    
+    // Sort
+    switch(sortBy) {
+      case 'confidence':
+        filtered.sort((a, b) => b.confidence_score - a.confidence_score)
+        break
+      case 'potential':
+        filtered.sort((a, b) => {
+          const aGain = ((a.target_price - a.entry_price) / a.entry_price) * 100
+          const bGain = ((b.target_price - b.entry_price) / b.entry_price) * 100
+          return bGain - aGain
+        })
+        break
+      case 'price_low':
+        filtered.sort((a, b) => a.entry_price - b.entry_price)
+        break
+      case 'price_high':
+        filtered.sort((a, b) => b.entry_price - a.entry_price)
+        break
+      case 'newest':
+        filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        break
+    }
+    
+    setFilteredPicks(filtered)
   }
 
   function buyStock(pick: any) {
@@ -54,6 +108,19 @@ export default function PaperTradingPage() {
     sum + (pos.currentPrice * pos.quantity), 0)
   const netProfit = (balance + totalPositionValue) - 10000
   const profitPercent = ((netProfit / 10000) * 100).toFixed(2)
+
+  const displayPicks = showAll ? filteredPicks : filteredPicks.slice(0, 12)
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-green-400 mx-auto mb-4"></div>
+          <div className="text-2xl text-green-400 font-bold">Loading Portfolio...</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
@@ -165,64 +232,208 @@ export default function PaperTradingPage() {
         </div>
       )}
 
-      {/* Available Stocks */}
-      <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20">
-        <h2 className="text-3xl font-bold mb-6">🛒 Buy AI Picks</h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {availablePicks.map((pick) => {
-            const canAfford = pick.entry_price * quantity <= balance
-            return (
-              <div key={pick.id} className={`bg-slate-900/50 rounded-lg p-6 border ${canAfford ? 'border-green-500/30' : 'border-red-500/30'}`}>
-                <div className="text-3xl font-bold text-white mb-2">${pick.symbol}</div>
-                <div className="mb-4">
-                  <span className="px-3 py-1 bg-purple-500/20 text-purple-300 text-sm rounded-full">
-                    {pick.ai_name}
-                  </span>
-                </div>
+      {/* Filters & Controls */}
+      <div className="bg-slate-800/50 rounded-xl p-6 border border-purple-500/20 mb-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-2xl font-bold">🛒 Available Stocks</h2>
+          <div className="text-sm text-gray-400">
+            Showing {displayPicks.length} of {filteredPicks.length} stocks
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-4 gap-4">
+          {/* AI Filter */}
+          <div>
+            <label className="text-sm text-gray-400 mb-2 block">Filter by AI</label>
+            <select
+              value={selectedAI}
+              onChange={(e) => setSelectedAI(e.target.value)}
+              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-2 text-white text-sm"
+            >
+              {aiOptions.map(ai => (
+                <option key={ai} value={ai}>
+                  {ai === 'all' ? 'All AIs' : ai}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Confidence Filter */}
+          <div>
+            <label className="text-sm text-gray-400 mb-2 block">
+              Min Confidence: {minConfidence}%
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={minConfidence}
+              onChange={(e) => setMinConfidence(parseInt(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          {/* Sort By */}
+          <div>
+            <label className="text-sm text-gray-400 mb-2 block">Sort By</label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-2 text-white text-sm"
+            >
+              <option value="confidence">Highest Confidence</option>
+              <option value="potential">Highest Potential Gain</option>
+              <option value="price_low">Price: Low to High</option>
+              <option value="price_high">Price: High to Low</option>
+              <option value="newest">Newest First</option>
+            </select>
+          </div>
+
+          {/* Show All Toggle */}
+          <div>
+            <label className="text-sm text-gray-400 mb-2 block">Display</label>
+            <button
+              onClick={() => setShowAll(!showAll)}
+              className={`w-full py-2 rounded-lg font-medium transition-all ${
+                showAll
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-slate-900 border border-purple-500/30 text-purple-300 hover:bg-slate-800'
+              }`}
+            >
+              {showAll ? `Showing All (${filteredPicks.length})` : `Show All (${filteredPicks.length})`}
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Filter Tags */}
+        <div className="flex flex-wrap gap-2 mt-4">
+          <button
+            onClick={() => { setMinConfidence(70); setSortBy('confidence') }}
+            className="px-3 py-1 bg-green-500/20 border border-green-500/30 text-green-300 rounded-full text-xs hover:bg-green-500/30 transition-all"
+          >
+            🔥 High Confidence (70%+)
+          </button>
+          <button
+            onClick={() => { setMinConfidence(0); setSortBy('potential') }}
+            className="px-3 py-1 bg-blue-500/20 border border-blue-500/30 text-blue-300 rounded-full text-xs hover:bg-blue-500/30 transition-all"
+          >
+            🚀 Best Potential Gains
+          </button>
+          <button
+            onClick={() => { setMinConfidence(0); setSortBy('newest') }}
+            className="px-3 py-1 bg-purple-500/20 border border-purple-500/30 text-purple-300 rounded-full text-xs hover:bg-purple-500/30 transition-all"
+          >
+            ⚡ Latest Picks
+          </button>
+          <button
+            onClick={() => { setSelectedAI('all'); setMinConfidence(0); setSortBy('confidence'); setShowAll(false) }}
+            className="px-3 py-1 bg-red-500/20 border border-red-500/30 text-red-300 rounded-full text-xs hover:bg-red-500/30 transition-all"
+          >
+            🔄 Reset Filters
+          </button>
+        </div>
+      </div>
+
+      {/* Available Stocks Grid */}
+      <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20 mb-8">
+        {displayPicks.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="text-6xl mb-4">🔍</div>
+            <h3 className="text-2xl font-bold text-white mb-2">No stocks match your filters</h3>
+            <p className="text-gray-400">Try adjusting your filters to see more options</p>
+          </div>
+        ) : (
+          <>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {displayPicks.map((pick) => {
+                const canAfford = pick.entry_price * quantity <= balance
+                const potentialGain = ((pick.target_price - pick.entry_price) / pick.entry_price) * 100
                 
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div className="bg-slate-800/50 rounded p-2">
-                    <div className="text-xs text-gray-400">Price</div>
-                    <div className="font-bold text-blue-400">${pick.entry_price.toFixed(2)}</div>
-                  </div>
-                  <div className="bg-slate-800/50 rounded p-2">
-                    <div className="text-xs text-gray-400">Target</div>
-                    <div className="font-bold text-green-400">${pick.target_price.toFixed(2)}</div>
-                  </div>
-                </div>
+                return (
+                  <div key={pick.id} className={`bg-slate-900/50 rounded-lg p-6 border ${canAfford ? 'border-green-500/30' : 'border-red-500/30'}`}>
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="text-3xl font-bold text-white">${pick.symbol}</div>
+                      <div className="text-right">
+                        <div className={`text-xs px-2 py-1 rounded-full ${
+                          pick.confidence_score >= 80 ? 'bg-green-500/20 text-green-300' :
+                          pick.confidence_score >= 60 ? 'bg-blue-500/20 text-blue-300' :
+                          'bg-yellow-500/20 text-yellow-300'
+                        }`}>
+                          {pick.confidence_score}% confident
+                        </div>
+                      </div>
+                    </div>
 
-                <div className="mb-4">
-                  <label className="text-sm text-gray-400 mb-2 block">Quantity</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={selectedStock?.id === pick.id ? quantity : 1}
-                    onChange={(e) => {
-                      setSelectedStock(pick)
-                      setQuantity(parseInt(e.target.value) || 1)
-                    }}
-                    className="w-full bg-slate-800 border border-purple-500/30 rounded px-3 py-2 text-white"
-                  />
-                  <div className="text-xs text-gray-400 mt-1">
-                    Total: ${(pick.entry_price * (selectedStock?.id === pick.id ? quantity : 1)).toFixed(2)}
-                  </div>
-                </div>
+                    <div className="mb-4">
+                      <span className="px-3 py-1 bg-purple-500/20 text-purple-300 text-sm rounded-full">
+                        {pick.ai_name}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div className="bg-slate-800/50 rounded p-2">
+                        <div className="text-xs text-gray-400">Current Price</div>
+                        <div className="font-bold text-white">${pick.entry_price.toFixed(2)}</div>
+                      </div>
+                      <div className="bg-slate-800/50 rounded p-2">
+                        <div className="text-xs text-gray-400">Target Price</div>
+                        <div className="font-bold text-green-400">${pick.target_price.toFixed(2)}</div>
+                      </div>
+                    </div>
 
+                    <div className="mb-4">
+                      <div className="text-xs text-gray-400 mb-1">Potential Gain</div>
+                      <div className={`text-2xl font-bold ${potentialGain >= 20 ? 'text-green-400' : potentialGain >= 10 ? 'text-blue-400' : 'text-yellow-400'}`}>
+                        +{potentialGain.toFixed(1)}%
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <label className="text-sm text-gray-400 mb-2 block">Quantity</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={selectedStock?.id === pick.id ? quantity : 1}
+                        onChange={(e) => {
+                          setSelectedStock(pick)
+                          setQuantity(parseInt(e.target.value) || 1)
+                        }}
+                        className="w-full bg-slate-800 border border-purple-500/30 rounded px-3 py-2 text-white"
+                      />
+                      <div className="text-xs text-gray-400 mt-1">
+                        Total: ${(pick.entry_price * (selectedStock?.id === pick.id ? quantity : 1)).toFixed(2)}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => { setSelectedStock(pick); buyStock(pick) }}
+                      disabled={!canAfford}
+                      className={`w-full font-bold py-3 rounded-lg transition-all ${
+                        canAfford
+                          ? 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white'
+                          : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      {canAfford ? 'Buy Now 💰' : 'Insufficient Funds'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+
+            {!showAll && filteredPicks.length > 12 && (
+              <div className="text-center mt-8">
                 <button
-                  onClick={() => buyStock(pick)}
-                  disabled={!canAfford}
-                  className={`w-full font-bold py-3 rounded-lg transition-all ${
-                    canAfford
-                      ? 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white'
-                      : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                  }`}
+                  onClick={() => setShowAll(true)}
+                  className="px-8 py-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold rounded-lg transition-all"
                 >
-                  {canAfford ? 'Buy Now 💰' : 'Insufficient Funds'}
+                  Show All {filteredPicks.length} Stocks
                 </button>
               </div>
-            )
-          })}
-        </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   )
