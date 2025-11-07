@@ -119,7 +119,7 @@ export default function BacktestingPage() {
       const totalReturn = ((finalCapital - startingCapital) / startingCapital) * 100
       
       // Calculate Sharpe Ratio (simplified)
-      const returns = trades.map(t => t.returnPercent)
+      const returns = trades.map((t: any) => t.returnPercent)
       const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length
       const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length
       const stdDev = Math.sqrt(variance)
@@ -178,7 +178,7 @@ export default function BacktestingPage() {
               onChange={(e) => setSelectedAI(e.target.value)}
               className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-3 text-white"
             >
-              {aiOptions.map(ai => (
+              {aiOptions.map((ai: any) => (
                 <option key={ai} value={ai}>
                   {ai === 'all' ? 'All AIs Combined' : ai}
                 </option>
