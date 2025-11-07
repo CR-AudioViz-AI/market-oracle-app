@@ -38,7 +38,7 @@ export default function PaperTradingPage() {
       setAvailablePicks(data)
       
       // Extract unique AI names
-      const unique = Array.from(new Set(data.map((d: any) => d.ai_name)))
+      const unique = Array.from(new Set(data.map((d: any) => d.ai_name))) as string[]
       setAiOptions(['all', ...unique])
     }
     setLoading(false)
