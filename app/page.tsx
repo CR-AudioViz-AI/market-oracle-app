@@ -9,26 +9,25 @@ export default function MarketOracle() {
   const [filteredPicks, setFilteredPicks] = useState<any[]>([])
   const [aiStats, setAiStats] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [showAll, setShowAll] = useState(false)
   
-  // Filters
   const [selectedAI, setSelectedAI] = useState<string>('all')
   const [minConfidence, setMinConfidence] = useState<number>(0)
   const [searchTerm, setSearchTerm] = useState<string>('')
+  const [sortBy, setSortBy] = useState<string>('confidence')
   
-  // Stats
-  const [userStreak, setUserStreak] = useState(7) // Days visiting
+  const [userStreak, setUserStreak] = useState(7)
   const [totalGains, setTotalGains] = useState(0)
 
   useEffect(() => {
     fetchData()
-    // Auto-refresh every 30 seconds
     const interval = setInterval(fetchData, 30000)
     return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
     applyFilters()
-  }, [picks, selectedAI, minConfidence, searchTerm])
+  }, [picks, selectedAI, minConfidence, searchTerm, sortBy])
 
   async function fetchData() {
     const { data: picksData } = await supabase
@@ -39,7 +38,6 @@ export default function MarketOracle() {
     if (picksData) {
       setPicks(picksData)
       
-      // Calculate AI stats
       const aiMap = new Map()
       picksData.forEach(pick => {
         if (!aiMap.has(pick.ai_name)) {
@@ -87,6 +85,22 @@ export default function MarketOracle() {
         pick.reasoning.toLowerCase().includes(searchTerm.toLowerCase())
       )
     }
+
+    switch(sortBy) {
+      case 'confidence':
+        filtered.sort((a, b) => b.confidence_score - a.confidence_score)
+        break
+      case 'gains':
+        filtered.sort((a, b) => {
+          const aGain = ((a.target_price - a.entry_price) / a.entry_price) * 100
+          const bGain = ((b.target_price - b.entry_price) / b.entry_price) * 100
+          return bGain - aGain
+        })
+        break
+      case 'newest':
+        filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        break
+    }
     
     setFilteredPicks(filtered)
   }
@@ -95,21 +109,22 @@ export default function MarketOracle() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-500 mx-auto mb-4"></div>
-          <div className="text-2xl text-purple-400 font-bold">Loading the Oracle...</div>
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-[#00CED1] mx-auto mb-4"></div>
+          <div className="text-2xl text-[#00CED1] font-bold">Loading the Oracle...</div>
           <div className="text-gray-400 mt-2">Analyzing {picks.length} AI predictions</div>
         </div>
       </div>
     )
   }
 
+  const displayPicks = showAll ? filteredPicks : filteredPicks.slice(0, 12)
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
-      {/* Hero Section */}
       <div className="text-center mb-12 relative">
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-blue-500/10 blur-3xl -z-10"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-[#00CED1]/10 via-[#E31937]/10 to-[#003366]/10 blur-3xl -z-10"></div>
         
-        <h1 className="text-6xl md:text-7xl font-black bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 bg-clip-text text-transparent mb-4 animate-gradient">
+        <h1 className="text-6xl md:text-7xl font-black bg-gradient-to-r from-[#00CED1] via-white to-[#E31937] bg-clip-text text-transparent mb-4 animate-gradient">
           Market Oracle
         </h1>
         
@@ -122,8 +137,8 @@ export default function MarketOracle() {
             <span className="text-green-400 font-bold">🔥 {userStreak} Day Streak!</span>
           </div>
           
-          <div className="bg-purple-500/20 px-6 py-3 rounded-full border border-purple-500/30">
-            <span className="text-purple-300 font-bold">💎 {picks.length} Live Picks</span>
+          <div className="bg-[#00CED1]/20 px-6 py-3 rounded-full border border-[#00CED1]/30">
+            <span className="text-[#00CED1] font-bold">💎 {picks.length} Live Picks</span>
           </div>
           
           <div className="bg-blue-500/20 px-6 py-3 rounded-full border border-blue-500/30">
@@ -135,20 +150,20 @@ export default function MarketOracle() {
       {/* Quick Action Cards */}
       <div className="grid md:grid-cols-4 gap-4 mb-8">
         <Link href="/hot-picks" className="group">
-          <div className="bg-gradient-to-br from-orange-500/20 to-red-500/20 rounded-xl p-6 border border-orange-500/30 hover:scale-105 transition-transform cursor-pointer">
+          <div className="bg-gradient-to-br from-[#E31937]/20 to-orange-500/20 rounded-xl p-6 border border-[#E31937]/30 hover:scale-105 transition-transform cursor-pointer">
             <div className="text-4xl mb-2">🔥</div>
             <h3 className="text-xl font-bold text-white mb-2">Hot Picks</h3>
             <p className="text-sm text-gray-300">Multiple AIs agree</p>
-            <div className="mt-4 text-orange-400 font-bold group-hover:translate-x-2 transition-transform">View Picks →</div>
+            <div className="mt-4 text-[#E31937] font-bold group-hover:translate-x-2 transition-transform">View Picks →</div>
           </div>
         </Link>
 
         <Link href="/portfolio" className="group">
-          <div className="bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-xl p-6 border border-purple-500/30 hover:scale-105 transition-transform cursor-pointer">
+          <div className="bg-gradient-to-br from-[#00CED1]/20 to-blue-500/20 rounded-xl p-6 border border-[#00CED1]/30 hover:scale-105 transition-transform cursor-pointer">
             <div className="text-4xl mb-2">📊</div>
             <h3 className="text-xl font-bold text-white mb-2">Your Portfolio</h3>
             <p className="text-sm text-gray-300">Track all picks</p>
-            <div className="mt-4 text-purple-400 font-bold group-hover:translate-x-2 transition-transform">View Stats →</div>
+            <div className="mt-4 text-[#00CED1] font-bold group-hover:translate-x-2 transition-transform">View Stats →</div>
           </div>
         </Link>
 
@@ -162,17 +177,17 @@ export default function MarketOracle() {
         </Link>
 
         <Link href="/learn" className="group">
-          <div className="bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl p-6 border border-blue-500/30 hover:scale-105 transition-transform cursor-pointer">
+          <div className="bg-gradient-to-br from-[#003366]/20 to-purple-500/20 rounded-xl p-6 border border-[#003366]/30 hover:scale-105 transition-transform cursor-pointer">
             <div className="text-4xl mb-2">📚</div>
             <h3 className="text-xl font-bold text-white mb-2">Learn</h3>
             <p className="text-sm text-gray-300">Trading guides</p>
-            <div className="mt-4 text-blue-400 font-bold group-hover:translate-x-2 transition-transform">Get Smart →</div>
+            <div className="mt-4 text-purple-400 font-bold group-hover:translate-x-2 transition-transform">Get Smart →</div>
           </div>
         </Link>
       </div>
 
       {/* AI Leaderboard */}
-      <div className="bg-slate-800/50 backdrop-blur-lg rounded-xl p-8 border border-purple-500/20 mb-8">
+      <div className="bg-slate-800/50 backdrop-blur-lg rounded-xl p-8 border border-[#00CED1]/20 mb-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-3xl font-bold">🏆 AI Leaderboard</h2>
           <span className="text-sm text-gray-400">Updated 30s ago</span>
@@ -183,14 +198,14 @@ export default function MarketOracle() {
             const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : ''
             const borderColor = index === 0 ? 'border-yellow-500/50' : 
                                index === 1 ? 'border-gray-400/50' : 
-                               index === 2 ? 'border-orange-600/50' : 'border-purple-500/30'
+                               index === 2 ? 'border-orange-600/50' : 'border-[#00CED1]/30'
             
             return (
               <div
                 key={ai.ai_name}
                 onClick={() => setSelectedAI(ai.ai_name)}
                 className={`bg-slate-900/50 rounded-lg p-6 border-2 ${borderColor} hover:scale-105 transition-all cursor-pointer ${
-                  selectedAI === ai.ai_name ? 'ring-2 ring-purple-400' : ''
+                  selectedAI === ai.ai_name ? 'ring-2 ring-[#00CED1]' : ''
                 }`}
               >
                 <div className="text-center">
@@ -211,7 +226,7 @@ export default function MarketOracle() {
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-400">Confidence</span>
-                      <span className="text-blue-400 font-bold">{ai.avg_confidence}%</span>
+                      <span className="text-[#00CED1] font-bold">{ai.avg_confidence}%</span>
                     </div>
                   </div>
                 </div>
@@ -224,7 +239,7 @@ export default function MarketOracle() {
           <div className="mt-4 text-center">
             <button
               onClick={() => setSelectedAI('all')}
-              className="px-6 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-full transition"
+              className="px-6 py-2 bg-[#00CED1]/20 hover:bg-[#00CED1]/30 text-[#00CED1] rounded-full transition"
             >
               Clear Filter ✕
             </button>
@@ -233,8 +248,9 @@ export default function MarketOracle() {
       </div>
 
       {/* Search & Filters */}
-      <div className="bg-slate-800/50 rounded-xl p-6 border border-purple-500/20 mb-8">
-        <div className="grid md:grid-cols-3 gap-4">
+      <div className="bg-slate-800/50 rounded-xl p-6 border border-[#00CED1]/20 mb-8">
+        <h2 className="text-xl font-bold mb-4">⚙️ Search & Filter All Picks</h2>
+        <div className="grid md:grid-cols-4 gap-4">
           <div>
             <label className="text-sm text-gray-400 mb-2 block">🔍 Search Stocks</label>
             <input
@@ -242,22 +258,8 @@ export default function MarketOracle() {
               placeholder="Type a symbol like AAPL..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-400 transition"
+              className="w-full bg-slate-900 border border-[#00CED1]/30 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-[#00CED1] transition"
             />
-          </div>
-
-          <div>
-            <label className="text-sm text-gray-400 mb-2 block">🤖 Filter by AI</label>
-            <select
-              value={selectedAI}
-              onChange={(e) => setSelectedAI(e.target.value)}
-              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-400 transition"
-            >
-              <option value="all">All AIs</option>
-              {aiStats.map(ai => (
-                <option key={ai.ai_name} value={ai.ai_name}>{ai.ai_name}</option>
-              ))}
-            </select>
           </div>
 
           <div>
@@ -268,19 +270,46 @@ export default function MarketOracle() {
               max="100"
               value={minConfidence}
               onChange={(e) => setMinConfidence(Number(e.target.value))}
-              className="w-full h-3 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+              className="w-full h-3 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#00CED1]"
             />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-400 mb-2 block">📊 Sort By</label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="w-full bg-slate-900 border border-[#00CED1]/30 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#00CED1] transition"
+            >
+              <option value="confidence">Highest Confidence</option>
+              <option value="gains">Biggest Expected Gains</option>
+              <option value="newest">Newest First</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-400 mb-2 block">👁️ Display</label>
+            <button
+              onClick={() => setShowAll(!showAll)}
+              className={`w-full py-3 rounded-lg font-bold transition-all ${
+                showAll
+                  ? 'bg-[#00CED1] text-white'
+                  : 'bg-slate-900 border border-[#00CED1]/30 text-[#00CED1] hover:bg-[#00CED1]/10'
+              }`}
+            >
+              {showAll ? `Showing All ${filteredPicks.length}` : `Show All (${filteredPicks.length})`}
+            </button>
           </div>
         </div>
 
         <div className="mt-4 text-center text-sm text-gray-400">
-          Showing <span className="text-purple-400 font-bold">{filteredPicks.length}</span> of {picks.length} picks
+          Showing <span className="text-[#00CED1] font-bold">{displayPicks.length}</span> of {filteredPicks.length} filtered picks ({picks.length} total)
         </div>
       </div>
 
       {/* Stock Picks Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredPicks.slice(0, 12).map((pick) => {
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        {displayPicks.map((pick) => {
           const gainPercent = ((pick.target_price - pick.entry_price) / pick.entry_price * 100).toFixed(1)
           const isHot = pick.confidence_score >= 80
           
@@ -288,19 +317,19 @@ export default function MarketOracle() {
             <div
               key={pick.id}
               className={`bg-slate-900/50 rounded-xl p-6 border-2 hover:scale-105 transition-all cursor-pointer ${
-                isHot ? 'border-orange-500/50 shadow-lg shadow-orange-500/20' : 'border-purple-500/30'
+                isHot ? 'border-[#E31937]/50 shadow-lg shadow-[#E31937]/20' : 'border-[#00CED1]/30'
               }`}
             >
               {isHot && (
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="px-3 py-1 bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold rounded-full">
+                  <span className="px-3 py-1 bg-gradient-to-r from-[#E31937] to-orange-500 text-white text-xs font-bold rounded-full">
                     🔥 HOT PICK
                   </span>
                 </div>
               )}
 
               <div className="flex items-center justify-between mb-4">
-                <span className="px-3 py-1 bg-purple-500/20 text-purple-300 text-sm font-semibold rounded-full">
+                <span className="px-3 py-1 bg-[#00CED1]/20 text-[#00CED1] text-sm font-semibold rounded-full">
                   {pick.ai_name}
                 </span>
                 <span className="text-xs text-gray-500">
@@ -347,7 +376,7 @@ export default function MarketOracle() {
                 {pick.reasoning}
               </div>
 
-              <button className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold py-3 rounded-lg transition-all">
+              <button className="w-full bg-gradient-to-r from-[#00CED1] to-blue-500 hover:from-[#00CED1]/80 hover:to-blue-500/80 text-white font-bold py-3 rounded-lg transition-all">
                 Add to Watchlist ⭐
               </button>
             </div>
@@ -355,16 +384,30 @@ export default function MarketOracle() {
         })}
       </div>
 
-      {filteredPicks.length > 12 && (
-        <div className="text-center mt-8">
-          <button className="px-8 py-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold rounded-xl transition-all">
-            Load More Picks ({filteredPicks.length - 12} remaining)
+      {!showAll && filteredPicks.length > 12 && (
+        <div className="text-center">
+          <button 
+            onClick={() => setShowAll(true)}
+            className="px-8 py-4 bg-gradient-to-r from-[#00CED1] to-blue-500 hover:from-[#00CED1]/80 hover:to-blue-500/80 text-white font-bold rounded-xl transition-all text-lg"
+          >
+            Show All {filteredPicks.length} Picks →
+          </button>
+        </div>
+      )}
+
+      {showAll && (
+        <div className="text-center">
+          <button 
+            onClick={() => {setShowAll(false); window.scrollTo({top: 0, behavior: 'smooth'})}}
+            className="px-8 py-4 bg-slate-800 hover:bg-slate-700 border border-[#00CED1]/30 text-[#00CED1] font-bold rounded-xl transition-all"
+          >
+            Show Less ↑
           </button>
         </div>
       )}
 
       {/* Bottom CTA */}
-      <div className="mt-12 bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-blue-500/10 rounded-xl p-8 border border-purple-500/30 text-center">
+      <div className="mt-12 bg-gradient-to-r from-[#00CED1]/10 via-[#E31937]/10 to-[#003366]/10 rounded-xl p-8 border border-[#00CED1]/30 text-center">
         <h2 className="text-3xl font-bold mb-4">Ready to Start Trading?</h2>
         <p className="text-gray-300 mb-6">Practice with $10,000 virtual money. Zero risk. Real experience.</p>
         <Link href="/paper-trading">
