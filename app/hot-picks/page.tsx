@@ -38,7 +38,7 @@ export default function HotPicksPage() {
       setPicks(data)
       
       // Extract unique AI names
-      const unique = Array.from(new Set(data.map(d => d.ai_name)))
+      const unique = Array.from(new Set(data.map(d => d.ai_name))) as string[]
       setAiOptions(['all', ...unique])
       
       // Get most recent price update time
