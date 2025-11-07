@@ -55,13 +55,13 @@ export default function MarketOracle() {
         ai.total_confidence += pick.confidence_score
       })
 
-      const stats = Array.from(aiMap.values()).map(ai => ({
+      const stats = Array.from(aiMap.values()).map((ai: any) => ({
         ...ai,
         avg_confidence: Math.round(ai.total_confidence / ai.total_picks),
         total_gain: Math.round(ai.total_gain * 10) / 10
       }))
 
-      stats.sort((a, b) => b.total_gain - a.total_gain)
+      stats.sort((a: any, b: any) => b.total_gain - a.total_gain)
       setAiStats(stats)
       
       const totalGain = stats.reduce((sum, ai) => sum + ai.total_gain, 0)
@@ -74,13 +74,13 @@ export default function MarketOracle() {
     let filtered = [...picks]
     
     if (selectedAI !== 'all') {
-      filtered = filtered.filter(pick => pick.ai_name === selectedAI)
+      filtered = filtered.filter((pick: any) => pick.ai_name === selectedAI)
     }
     
-    filtered = filtered.filter(pick => pick.confidence_score >= minConfidence)
+    filtered = filtered.filter((pick: any) => pick.confidence_score >= minConfidence)
     
     if (searchTerm) {
-      filtered = filtered.filter(pick => 
+      filtered = filtered.filter((pick: any) => 
         pick.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
         pick.reasoning.toLowerCase().includes(searchTerm.toLowerCase())
       )
@@ -88,17 +88,17 @@ export default function MarketOracle() {
 
     switch(sortBy) {
       case 'confidence':
-        filtered.sort((a, b) => b.confidence_score - a.confidence_score)
+        filtered.sort((a: any, b: any) => b.confidence_score - a.confidence_score)
         break
       case 'gains':
-        filtered.sort((a, b) => {
+        filtered.sort((a: any, b: any) => {
           const aGain = ((a.target_price - a.entry_price) / a.entry_price) * 100
           const bGain = ((b.target_price - b.entry_price) / b.entry_price) * 100
           return bGain - aGain
         })
         break
       case 'newest':
-        filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        filtered.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         break
     }
     
