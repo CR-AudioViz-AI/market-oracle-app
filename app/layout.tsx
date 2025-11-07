@@ -1,5 +1,6 @@
 import './globals.css'
 import type { Metadata } from 'next'
+import Navigation from '@/components/Navigation'
 
 export const metadata: Metadata = {
   title: 'Market Oracle - AI Stock Picking Battle',
@@ -14,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 min-h-screen text-white">
+        <Navigation />
         {children}
       </body>
     </html>
