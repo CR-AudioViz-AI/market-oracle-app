@@ -29,7 +29,12 @@
       ]
     },
     "noImplicitAny": false,
-    "strictNullChecks": false
+    "strictNullChecks": false,
+    "strictFunctionTypes": false,
+    "strictBindCallApply": false,
+    "strictPropertyInitialization": false,
+    "noImplicitThis": false,
+    "alwaysStrict": false
   },
   "include": [
     "next-env.d.ts",
