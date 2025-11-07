@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import Image from 'next/image'
 
 const features = [
   { name: 'AI Battle', href: '/', icon: '🏠' },
@@ -24,14 +25,20 @@ export default function Navigation() {
   const pathname = usePathname()
 
   return (
-    <nav className="bg-slate-900 border-b border-purple-500/20 sticky top-0 z-50">
+    <nav className="bg-gradient-to-r from-brand-navy via-slate-900 to-brand-navy border-b-2 border-brand-cyan/30 sticky top-0 z-50 shadow-lg shadow-brand-cyan/20">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center space-x-2">
-            <span className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-              Market Oracle
-            </span>
+          <Link href="/" className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-brand-cyan to-brand-red rounded-full flex items-center justify-center">
+              <span className="text-2xl">🔮</span>
+            </div>
+            <div>
+              <span className="text-xl font-bold bg-gradient-to-r from-brand-cyan to-white bg-clip-text text-transparent">
+                Market Oracle
+              </span>
+              <div className="text-[10px] text-brand-cyan/60">Powered by CR AudioViz AI</div>
+            </div>
           </Link>
 
           {/* Desktop Navigation */}
@@ -44,8 +51,8 @@ export default function Navigation() {
                   href={feature.href}
                   className={`flex items-center space-x-1 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
                     isActive
-                      ? 'bg-purple-500/20 text-purple-300'
-                      : 'text-gray-400 hover:text-white hover:bg-slate-800'
+                      ? 'bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30'
+                      : 'text-gray-400 hover:text-white hover:bg-slate-800 border border-transparent'
                   }`}
                 >
                   <span>{feature.icon}</span>
