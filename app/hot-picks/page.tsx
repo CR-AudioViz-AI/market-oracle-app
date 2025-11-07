@@ -1,370 +1,347 @@
-"use client"
+'use client';
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
-import Link from 'next/link'
+import { useState, useEffect } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { TrendingUp, TrendingDown, Clock, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+
+interface StockPick {
+  id: string;
+  ticker: string;
+  ai_name: string;
+  reasoning: string;
+  confidence: number;
+  price: number;
+  current_price: number | null;
+  target_price: number;
+  timeframe: string;
+  created_at: string;
+  last_updated: string | null;
+  upvotes: number;
+  downvotes: number;
+  ai_count?: number;
+}
 
 export default function HotPicksPage() {
-  const [picks, setPicks] = useState<any[]>([])
-  const [filteredPicks, setFilteredPicks] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [lastUpdate, setLastUpdate] = useState<string>('')
-  
-  const [selectedAI, setSelectedAI] = useState<string>('all')
-  const [minConfidence, setMinConfidence] = useState<number>(70)
-  const [sortBy, setSortBy] = useState<string>('performance')
-  const [showAll, setShowAll] = useState(false)
-  
-  const [aiOptions, setAiOptions] = useState<string[]>([])
+  const [picks, setPicks] = useState<StockPick[]>([]);
+  const [filteredPicks, setFilteredPicks] = useState<StockPick[]>([]);
+  const [aiFilter, setAiFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('consensus'); // NEW: Default to consensus
+  const [aiOptions, setAiOptions] = useState<string[]>(['all']);
+  const [loading, setLoading] = useState(true);
+  const [expandedPick, setExpandedPick] = useState<string | null>(null);
+  const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null);
+  const supabase = createClientComponentClient();
 
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 60000) // Auto-refresh every minute
-    return () => clearInterval(interval)
-  }, [])
+    loadPicks();
+    // Refresh prices every 5 minutes
+    const interval = setInterval(loadPicks, 300000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
-    applyFilters()
-  }, [picks, selectedAI, minConfidence, sortBy])
+    filterAndSortPicks();
+  }, [picks, aiFilter, sortBy]);
 
-  async function fetchData() {
-    const { data } = await supabase
-      .from('stock_picks')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (data) {
-      setPicks(data)
-      
-      // Extract unique AI names
-      const unique = Array.from(new Set(data.map(d => d.ai_name))) as string[]
-      setAiOptions(['all', ...unique])
-      
-      // Get most recent price update time
-      const recentUpdate = data
-        .filter(p => p.price_updated_at)
-        .sort((a, b) => new Date(b.price_updated_at).getTime() - new Date(a.price_updated_at).getTime())[0]
-      
-      if (recentUpdate) {
-        setLastUpdate(recentUpdate.price_updated_at)
-      }
-    }
-    setLoading(false)
-  }
-
-  async function refreshPrices() {
-    setRefreshing(true)
+  const loadPicks = async () => {
     try {
-      const response = await fetch('/api/update-prices?limit=50')
-      const data = await response.json()
-      console.log('Price update:', data)
-      
-      // Refresh the picks data
-      await fetchData()
-      
-      alert(`✅ Updated ${data.updated} prices successfully!`)
+      const { data, error } = await supabase
+        .from('ai_stock_picks')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        // Calculate AI consensus count for each ticker
+        const tickerCounts: { [key: string]: number } = {};
+        data.forEach(pick => {
+          tickerCounts[pick.ticker] = (tickerCounts[pick.ticker] || 0) + 1;
+        });
+
+        // Add ai_count to each pick
+        const picksWithConsensus = data.map(pick => ({
+          ...pick,
+          ai_count: tickerCounts[pick.ticker] || 1
+        }));
+
+        setPicks(picksWithConsensus);
+        
+        // Extract unique AI names
+        const unique = Array.from(new Set(data.map((d: any) => d.ai_name))) as string[];
+        setAiOptions(['all', ...unique]);
+        
+        // Get most recent price update time
+        const recentUpdate = data
+          .filter((p: any) => p.last_updated)
+          .sort((a: any, b: any) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime())[0];
+        
+        if (recentUpdate?.last_updated) {
+          setLastPriceUpdate(new Date(recentUpdate.last_updated));
+        }
+      }
+      setLoading(false);
     } catch (error) {
-      console.error('Error refreshing prices:', error)
-      alert('❌ Failed to refresh prices. Please try again.')
+      console.error('Error loading picks:', error);
+      setLoading(false);
     }
-    setRefreshing(false)
-  }
+  };
 
-  function applyFilters() {
-    let filtered = [...picks]
-    
-    if (selectedAI !== 'all') {
-      filtered = filtered.filter(pick => pick.ai_name === selectedAI)
+  const filterAndSortPicks = () => {
+    let filtered = [...picks];
+
+    // Filter by AI
+    if (aiFilter !== 'all') {
+      filtered = filtered.filter(p => p.ai_name === aiFilter);
     }
-    
-    filtered = filtered.filter(pick => pick.confidence_score >= minConfidence)
-    
-    switch(sortBy) {
+
+    // Sort
+    switch (sortBy) {
+      case 'consensus':
+        // Sort by AI count (most AIs picking it first)
+        filtered.sort((a, b) => (b.ai_count || 0) - (a.ai_count || 0));
+        break;
+      case 'recent':
+        filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        break;
       case 'performance':
-        filtered.sort((a, b) => (b.price_change_percent || 0) - (a.price_change_percent || 0))
-        break
-      case 'confidence':
-        filtered.sort((a, b) => b.confidence_score - a.confidence_score)
-        break
-      case 'potential':
         filtered.sort((a, b) => {
-          const aGain = ((a.target_price - a.entry_price) / a.entry_price) * 100
-          const bGain = ((b.target_price - b.entry_price) / b.entry_price) * 100
-          return bGain - aGain
-        })
-        break
-      case 'newest':
-        filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        break
+          const perfA = a.current_price && a.price ? ((a.current_price - a.price) / a.price) * 100 : -999;
+          const perfB = b.current_price && b.price ? ((b.current_price - b.price) / b.price) * 100 : -999;
+          return perfB - perfA;
+        });
+        break;
+      case 'confidence':
+        filtered.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        break;
     }
-    
-    setFilteredPicks(filtered)
-  }
 
-  function formatTime(timestamp: string) {
-    if (!timestamp) return 'Never'
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diff = Math.floor((now.getTime() - date.getTime()) / 1000 / 60)
+    setFilteredPicks(filtered);
+  };
+
+  const calculatePerformance = (pick: StockPick) => {
+    if (!pick.current_price || !pick.price) return null;
+    return ((pick.current_price - pick.price) / pick.price) * 100;
+  };
+
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     
-    if (diff < 1) return 'Just now'
-    if (diff < 60) return `${diff} min ago`
-    if (diff < 1440) return `${Math.floor(diff / 60)} hours ago`
-    return date.toLocaleDateString()
-  }
+    if (diffHours < 1) return 'Just now';
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}d ago`;
+  };
+
+  const toggleExpand = (pickId: string) => {
+    setExpandedPick(expandedPick === pickId ? null : pickId);
+  };
+
+  const getAIColor = (aiName: string) => {
+    const colors: { [key: string]: string } = {
+      'Perplexity': 'bg-teal-100 text-teal-800 border-teal-200',
+      'ChatGPT': 'bg-green-100 text-green-800 border-green-200',
+      'Claude': 'bg-orange-100 text-orange-800 border-orange-200',
+      'Gemini': 'bg-blue-100 text-blue-800 border-blue-200',
+      'Grok': 'bg-purple-100 text-purple-800 border-purple-200'
+    };
+    return colors[aiName] || 'bg-gray-100 text-gray-800 border-gray-200';
+  };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-[#E31937] mx-auto mb-4"></div>
-          <div className="text-2xl text-[#E31937] font-bold">Loading Hot Picks...</div>
+          <RefreshCw className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Loading hot picks...</p>
         </div>
       </div>
-    )
+    );
   }
 
-  const displayPicks = showAll ? filteredPicks : filteredPicks.slice(0, 12)
-  
-  // Calculate stats
-  const avgPerformance = filteredPicks.length > 0
-    ? filteredPicks.reduce((sum, p) => sum + (p.price_change_percent || 0), 0) / filteredPicks.length
-    : 0
-  const winners = filteredPicks.filter(p => (p.price_change_percent || 0) > 0).length
-  const losers = filteredPicks.filter(p => (p.price_change_percent || 0) < 0).length
-
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
-      <div className="mb-8">
-        <h1 className="text-5xl font-bold bg-gradient-to-r from-[#E31937] via-[#FF6B6B] to-[#FFA500] bg-clip-text text-transparent mb-4">
-          🔥 Hot Picks
-        </h1>
-        <p className="text-xl text-gray-300 mb-2">
-          AI-powered stock picks with live performance tracking
+    <div className="container mx-auto px-4 py-8 mt-20">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold mb-2">🔥 Hot Picks</h1>
+        <p className="text-gray-600">
+          AI-powered stock recommendations with live price tracking
         </p>
-        <p className="text-gray-400">
-          High-confidence predictions from 5 competing AIs - See what's winning NOW! 📈
-        </p>
-      </div>
-
-      {/* Price Update Bar */}
-      <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl p-4 border border-blue-500/30 mb-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="text-sm text-gray-400">Last Price Update</div>
-            <div className="text-lg font-bold text-white">
-              {lastUpdate ? formatTime(lastUpdate) : 'No updates yet'}
-            </div>
-            <div className="text-xs text-gray-500 mt-1">
-              💡 Prices delayed ~15 minutes (Yahoo Finance free tier)
-            </div>
-          </div>
-          <button
-            onClick={refreshPrices}
-            disabled={refreshing}
-            className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold rounded-lg transition-all disabled:cursor-not-allowed"
-          >
-            {refreshing ? (
-              <span className="flex items-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Updating...
-              </span>
-            ) : (
-              '🔄 Refresh Prices'
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Performance Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-slate-800/50 rounded-xl p-4 border border-purple-500/20">
-          <div className="text-sm text-gray-400">Total Picks</div>
-          <div className="text-3xl font-bold text-white">{filteredPicks.length}</div>
-        </div>
-        <div className="bg-green-500/20 rounded-xl p-4 border border-green-500/30">
-          <div className="text-sm text-gray-300">Winners</div>
-          <div className="text-3xl font-bold text-green-400">{winners}</div>
-        </div>
-        <div className="bg-red-500/20 rounded-xl p-4 border border-red-500/30">
-          <div className="text-sm text-gray-300">Losers</div>
-          <div className="text-3xl font-bold text-red-400">{losers}</div>
-        </div>
-        <div className={`rounded-xl p-4 border ${avgPerformance >= 0 ? 'bg-green-500/20 border-green-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
-          <div className="text-sm text-gray-300">Avg Performance</div>
-          <div className={`text-3xl font-bold ${avgPerformance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {avgPerformance >= 0 ? '+' : ''}{avgPerformance.toFixed(1)}%
-          </div>
-        </div>
+        {lastPriceUpdate && (
+          <p className="text-sm text-gray-500 mt-1">
+            <Clock className="w-4 h-4 inline mr-1" />
+            Prices updated: {formatTime(lastPriceUpdate.toISOString())}
+          </p>
+        )}
       </div>
 
       {/* Filters */}
-      <div className="bg-slate-800/50 rounded-xl p-6 border border-purple-500/20 mb-6">
-        <div className="grid md:grid-cols-4 gap-4">
-          <div>
-            <label className="text-sm text-gray-400 mb-2 block">Filter by AI</label>
-            <select
-              value={selectedAI}
-              onChange={(e) => setSelectedAI(e.target.value)}
-              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-2 text-white"
-            >
-              {aiOptions.map(ai => (
-                <option key={ai} value={ai}>
+      <div className="flex flex-col sm:flex-row gap-4 mb-6">
+        <div className="flex-1">
+          <label className="block text-sm font-medium mb-2">Filter by AI</label>
+          <Select value={aiFilter} onValueChange={setAiFilter}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {aiOptions.map((ai: any) => (
+                <SelectItem key={ai} value={ai}>
                   {ai === 'all' ? 'All AIs' : ai}
-                </option>
+                </SelectItem>
               ))}
-            </select>
-          </div>
+            </SelectContent>
+          </Select>
+        </div>
 
-          <div>
-            <label className="text-sm text-gray-400 mb-2 block">
-              Min Confidence: {minConfidence}%
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              value={minConfidence}
-              onChange={(e) => setMinConfidence(parseInt(e.target.value))}
-              className="w-full"
-            />
-          </div>
+        <div className="flex-1">
+          <label className="block text-sm font-medium mb-2">Sort by</label>
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="consensus">AI Consensus (5 AIs, 4 AIs, etc)</SelectItem>
+              <SelectItem value="recent">Most Recent</SelectItem>
+              <SelectItem value="performance">Best Performance</SelectItem>
+              <SelectItem value="confidence">Highest Confidence</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-          <div>
-            <label className="text-sm text-gray-400 mb-2 block">Sort By</label>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-2 text-white"
-            >
-              <option value="performance">Current Performance</option>
-              <option value="confidence">Highest Confidence</option>
-              <option value="potential">Target Potential</option>
-              <option value="newest">Newest First</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="text-sm text-gray-400 mb-2 block">Display</label>
-            <button
-              onClick={() => setShowAll(!showAll)}
-              className={`w-full py-2 rounded-lg font-medium transition-all ${
-                showAll
-                  ? 'bg-purple-500 text-white'
-                  : 'bg-slate-900 border border-purple-500/30 text-purple-300'
-              }`}
-            >
-              {showAll ? `Showing All (${filteredPicks.length})` : `Show All (${filteredPicks.length})`}
-            </button>
-          </div>
+        <div className="flex items-end">
+          <Button onClick={loadPicks} variant="outline" className="w-full sm:w-auto">
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh Prices
+          </Button>
         </div>
       </div>
 
-      {/* Picks Grid */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {displayPicks.map((pick) => {
-          const targetGain = ((pick.target_price - pick.entry_price) / pick.entry_price) * 100
-          const currentGain = pick.price_change_percent || 0
-          const currentPrice = pick.current_price || pick.entry_price
-          const isWinning = currentGain > 0
-          
+      {/* Stock Picks */}
+      <div className="grid grid-cols-1 gap-4">
+        {filteredPicks.map((pick) => {
+          const performance = calculatePerformance(pick);
+          const isExpanded = expandedPick === pick.id;
+
           return (
-            <div key={pick.id} className={`bg-slate-900/50 rounded-xl p-6 border ${isWinning ? 'border-green-500/30' : currentGain < 0 ? 'border-red-500/30' : 'border-purple-500/20'}`}>
-              {/* Header with Symbol and Performance */}
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <div className="text-3xl font-bold text-white">${pick.symbol}</div>
-                  <div className="text-sm text-gray-400 mt-1">{pick.ai_name}</div>
-                </div>
-                <div className="text-right">
-                  <div className={`text-2xl font-bold ${isWinning ? 'text-green-400' : currentGain < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                    {currentGain >= 0 ? '+' : ''}{currentGain.toFixed(2)}%
+            <Card 
+              key={pick.id} 
+              className="hover:shadow-lg transition-all cursor-pointer"
+              onClick={() => toggleExpand(pick.id)}
+            >
+              <CardContent className="pt-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="text-2xl font-bold">{pick.ticker}</h3>
+                      <Badge className={getAIColor(pick.ai_name)}>
+                        {pick.ai_name}
+                      </Badge>
+                      {pick.ai_count && pick.ai_count > 1 && (
+                        <Badge variant="secondary" className="bg-purple-100 text-purple-800">
+                          {pick.ai_count} AIs picked this
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-600">
+                      {formatTime(pick.created_at)} • {pick.timeframe || 'Medium-term'}
+                    </p>
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {isWinning ? '🟢 Winning' : currentGain < 0 ? '🔴 Losing' : '⚪ Flat'}
-                  </div>
-                </div>
-              </div>
 
-              {/* Confidence Badge */}
-              <div className="mb-4">
-                <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                  pick.confidence_score >= 80 ? 'bg-green-500/20 text-green-300' :
-                  pick.confidence_score >= 60 ? 'bg-blue-500/20 text-blue-300' :
-                  'bg-yellow-500/20 text-yellow-300'
-                }`}>
-                  {pick.confidence_score}% Confidence
-                </span>
-              </div>
-
-              {/* Price Info */}
-              <div className="space-y-3 mb-4">
-                <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg">
-                  <span className="text-sm text-gray-400">Entry Price</span>
-                  <span className="font-bold text-white">${pick.entry_price.toFixed(2)}</span>
-                </div>
-                
-                <div className={`flex justify-between items-center p-3 rounded-lg ${isWinning ? 'bg-green-500/20' : currentGain < 0 ? 'bg-red-500/20' : 'bg-slate-800/50'}`}>
-                  <span className="text-sm text-gray-300">Current Price</span>
                   <div className="text-right">
-                    <div className={`font-bold ${isWinning ? 'text-green-400' : currentGain < 0 ? 'text-red-400' : 'text-white'}`}>
-                      ${currentPrice.toFixed(2)}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {currentGain >= 0 ? '+' : ''}{(currentPrice - pick.entry_price).toFixed(2)}
-                    </div>
+                    {pick.current_price ? (
+                      <>
+                        <p className="text-2xl font-bold">${pick.current_price.toFixed(2)}</p>
+                        {performance !== null && (
+                          <div className={`flex items-center justify-end gap-1 ${performance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {performance >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                            <span className="font-semibold">
+                              {performance >= 0 ? '+' : ''}{performance.toFixed(2)}%
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-xl font-bold text-gray-400">Price loading...</p>
+                    )}
                   </div>
                 </div>
-                
-                <div className="flex justify-between items-center p-3 bg-blue-500/20 rounded-lg">
-                  <span className="text-sm text-gray-300">Target Price</span>
-                  <div className="text-right">
-                    <div className="font-bold text-blue-400">${pick.target_price.toFixed(2)}</div>
-                    <div className="text-xs text-gray-500">
-                      +{targetGain.toFixed(1)}% potential
+
+                {/* Expandable Section */}
+                <div className="border-t pt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Entry:</span>
+                        <span className="font-semibold ml-1">${pick.price.toFixed(2)}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Target:</span>
+                        <span className="font-semibold ml-1">${pick.target_price.toFixed(2)}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Confidence:</span>
+                        <span className="font-semibold ml-1">{pick.confidence}%</span>
+                      </div>
                     </div>
+                    <Button variant="ghost" size="sm">
+                      {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </Button>
                   </div>
-                </div>
-              </div>
 
-              {/* Reasoning */}
-              <div className="mb-4">
-                <div className="text-xs text-gray-400 mb-1">AI Reasoning:</div>
-                <div className="text-sm text-gray-300 line-clamp-2">
-                  {pick.reasoning}
-                </div>
-              </div>
+                  {isExpanded && (
+                    <div className="mt-4 space-y-4 bg-gray-50 p-4 rounded-lg">
+                      <div>
+                        <h4 className="font-semibold mb-2">AI Reasoning:</h4>
+                        <p className="text-sm text-gray-700 leading-relaxed">{pick.reasoning}</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-600">Pick Date:</span>
+                          <p className="font-semibold">{new Date(pick.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Timeframe:</span>
+                          <p className="font-semibold">{pick.timeframe || 'Medium-term'}</p>
+                        </div>
+                      </div>
 
-              {/* Timestamp */}
-              <div className="text-xs text-gray-500 text-center pt-3 border-t border-gray-700">
-                Picked {formatTime(pick.created_at)} • Updated {formatTime(pick.price_updated_at)}
-              </div>
-            </div>
-          )
+                      <div className="flex gap-2">
+                        <Badge variant="outline" className="text-green-600">
+                          👍 {pick.upvotes || 0} upvotes
+                        </Badge>
+                        <Badge variant="outline" className="text-red-600">
+                          👎 {pick.downvotes || 0} downvotes
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
         })}
       </div>
 
-      {!showAll && filteredPicks.length > 12 && (
-        <div className="text-center mt-8">
-          <button
-            onClick={() => setShowAll(true)}
-            className="px-8 py-4 bg-gradient-to-r from-[#E31937] to-[#FFA500] hover:from-[#C71530] hover:to-[#FF8C00] text-white font-bold rounded-lg transition-all"
-          >
-            Show All {filteredPicks.length} Picks
-          </button>
-        </div>
-      )}
-
-      {/* Empty State */}
       {filteredPicks.length === 0 && (
-        <div className="text-center py-12">
-          <div className="text-6xl mb-4">📭</div>
-          <h3 className="text-2xl font-bold text-white mb-2">No picks match your filters</h3>
-          <p className="text-gray-400">Try adjusting your filters to see more picks</p>
-        </div>
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-gray-600">No picks found with current filters</p>
+          </CardContent>
+        </Card>
       )}
     </div>
-  )
+  );
 }
