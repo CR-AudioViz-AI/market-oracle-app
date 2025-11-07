@@ -38,7 +38,7 @@ export default function PaperTradingPage() {
       setAvailablePicks(data)
       
       // Extract unique AI names
-      const unique = Array.from(new Set(data.map((d: any) => d.ai_name)))
+      const unique = Array.from(new Set(data.map(d: any) => d.ai_name)))
       setAiOptions(['all', ...unique])
     }
     setLoading(false)
@@ -49,32 +49,32 @@ export default function PaperTradingPage() {
     
     // Filter by AI
     if (selectedAI !== 'all') {
-      filtered = filtered.filter((pick: any) => pick.ai_name === selectedAI)
+      filtered = filtered.filter(pick: any) => pick.ai_name === selectedAI)
     }
     
     // Filter by confidence
-    filtered = filtered.filter((pick: any) => pick.confidence_score >= minConfidence)
+    filtered = filtered.filter(pick: any) => pick.confidence_score >= minConfidence)
     
     // Sort
     switch(sortBy) {
       case 'confidence':
-        filtered.sort((a: any, b: any) => b.confidence_score - a.confidence_score)
+        filtered.sort(a: any, b: any) => b.confidence_score - a.confidence_score)
         break
       case 'potential':
-        filtered.sort((a: any, b: any) => {
+        filtered.sort(a: any, b: any) => {
           const aGain = ((a.target_price - a.entry_price) / a.entry_price) * 100
           const bGain = ((b.target_price - b.entry_price) / b.entry_price) * 100
           return bGain - aGain
         })
         break
       case 'price_low':
-        filtered.sort((a: any, b: any) => a.entry_price - b.entry_price)
+        filtered.sort(a: any, b: any) => a.entry_price - b.entry_price)
         break
       case 'price_high':
-        filtered.sort((a: any, b: any) => b.entry_price - a.entry_price)
+        filtered.sort(a: any, b: any) => b.entry_price - a.entry_price)
         break
       case 'newest':
-        filtered.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        filtered.sort(a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         break
     }
     
@@ -250,7 +250,7 @@ export default function PaperTradingPage() {
               onChange={(e) => setSelectedAI(e.target.value)}
               className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-2 text-white text-sm"
             >
-              {aiOptions.map((ai: any) => (
+              {aiOptions.map(ai: any) => (
                 <option key={ai} value={ai}>
                   {ai === 'all' ? 'All AIs' : ai}
                 </option>
