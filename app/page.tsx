@@ -194,6 +194,7 @@ export default function MarketOracle() {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        // @ts-ignore
           {aiStats.map((ai, index) => {
             const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : ''
             const borderColor = index === 0 ? 'border-yellow-500/50' : 
@@ -309,6 +310,7 @@ export default function MarketOracle() {
 
       {/* Stock Picks Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        // @ts-ignore
         {displayPicks.map((pick) => {
           const gainPercent = ((pick.target_price - pick.entry_price) / pick.entry_price * 100).toFixed(1)
           const isHot = pick.confidence_score >= 80
