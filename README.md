@@ -1,32 +1,30 @@
-# Market Oracle - AI Stock Picking Battle
+# Market Oracle - AI Stock Predictions
 
-5 AI models compete to pick the best penny stocks (under $5).
+**Last Deployed: 2025-11-08 06:02:14 EST**
 
-## AIs Competing
-- Perplexity AI
-- GPT-4
-- Claude
-- Javari AI
-- Gemini
+5 AI models battle to pick the best penny stocks. Real-time predictions, paper trading, and community insights.
+
+## Live Site
+https://crav-market-oracle.vercel.app
 
 ## Features
-- Real-time AI Battle dashboard
-- 106+ stock picks from 5 competing AIs
-- Confidence scores and reasoning
-- Expected gain calculations
-- Live leaderboard
+- 14 complete pages
+- 106+ real AI stock picks
+- Real-time updates
+- Paper trading with $10,000 virtual money
+- Community chat
+- Educational lessons
+- Interactive charts
+- And more!
 
 ## Tech Stack
 - Next.js 14
 - TypeScript
 - Tailwind CSS
-- Supabase Database
+- Supabase
+- Vercel
 
-## Environment Variables Required
-```
-NEXT_PUBLIC_SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY
-```
+## Deployment
+Auto-deploys from main branch to Vercel.
 
-## Deploy
-Deployed on Vercel with automatic deployments from main branch.
+**Status: PRODUCTION READY** ✅
