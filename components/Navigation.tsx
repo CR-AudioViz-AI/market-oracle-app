@@ -8,6 +8,7 @@ import { Menu, X } from 'lucide-react'
 
 const navigationItems = [
   { name: 'Dashboard', href: '/' },
+  { name: 'Battle Royale', href: '/battle' },
   { name: 'Hot Picks', href: '/hot-picks' },
   { name: 'AI Insights', href: '/insights' },
   { name: 'Charts', href: '/charts' },
@@ -31,7 +32,6 @@ export function Navigation() {
     <nav className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800 shadow-lg">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
           <Link href="/" className="flex items-center space-x-3 group">
             <div className="relative w-12 h-12 transition-transform group-hover:scale-110">
               <Image
@@ -48,7 +48,6 @@ export function Navigation() {
             </span>
           </Link>
 
-          {/* Desktop Navigation */}
           <div className="hidden lg:flex items-center space-x-1">
             {navigationItems.map((item) => (
               <Link
@@ -65,21 +64,15 @@ export function Navigation() {
             ))}
           </div>
 
-          {/* Mobile menu button */}
           <button
             type="button"
             className="lg:hidden inline-flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           >
-            {mobileMenuOpen ? (
-              <X className="block h-6 w-6" />
-            ) : (
-              <Menu className="block h-6 w-6" />
-            )}
+            {mobileMenuOpen ? <X className="block h-6 w-6" /> : <Menu className="block h-6 w-6" />}
           </button>
         </div>
 
-        {/* Mobile menu */}
         {mobileMenuOpen && (
           <div className="lg:hidden pb-4">
             <div className="space-y-1">
