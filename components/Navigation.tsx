@@ -1,73 +1,102 @@
-"use client"
+'use client'
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import Image from 'next/image'
+import { useState } from 'react'
+import { Menu, X, TrendingUp } from 'lucide-react'
 
-const features = [
-  { name: 'AI Battle', href: '/', icon: '🏠' },
-  { name: 'Portfolio', href: '/portfolio', icon: '📊' },
-  { name: 'Backtesting', href: '/backtesting', icon: '📈' },
-  { name: 'Watchlist', href: '/watchlist', icon: '⭐' },
-  { name: 'Hot Picks', href: '/hot-picks', icon: '🔥' },
-  { name: 'Insights', href: '/insights', icon: '💡' },
-  { name: 'Charts', href: '/charts', icon: '📉' },
-  { name: 'Voting', href: '/voting', icon: '🗳️' },
-  { name: 'Paper Trade', href: '/paper-trading', icon: '💰' },
-  { name: 'Community', href: '/community', icon: '👥' },
-  { name: 'Learn', href: '/learn', icon: '📚' },
-  { name: 'Sectors', href: '/sectors', icon: '🏢' },
-  { name: 'Alerts', href: '/alerts', icon: '🔔' },
-  { name: 'Export', href: '/export', icon: '📥' },
+const navigationItems = [
+  { name: 'Dashboard', href: '/' },
+  { name: 'Hot Picks', href: '/hot-picks' },
+  { name: 'AI Insights', href: '/insights' },
+  { name: 'Charts', href: '/charts' },
+  { name: 'Backtesting', href: '/backtesting' },
+  { name: 'Voting', href: '/voting' },
+  { name: 'Paper Trading', href: '/paper-trading' },
+  { name: 'Portfolio', href: '/portfolio' },
+  { name: 'Watchlist', href: '/watchlist' },
+  { name: 'Community', href: '/community' },
+  { name: 'Learn', href: '/learn' },
+  { name: 'Alerts', href: '/alerts' },
+  { name: 'Sectors', href: '/sectors' },
+  { name: 'Export', href: '/export' },
 ]
 
-export default function Navigation() {
+export function Navigation() {
   const pathname = usePathname()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
-    <nav className="bg-white border-b fixed top-0 left-0 right-0 z-[9999] shadow-sm">
+    <nav className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800 shadow-lg">
       <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-20">
-          <Link href="/" className="flex items-center space-x-3">
-            <Image 
-              src="/market-oracle-logo.png" 
-              alt="Market Oracle" 
-              width={50} 
-              height={50}
-              className="rounded-lg"
-            />
-            <div>
-              <span className="text-xl font-bold text-white">Market Oracle</span>
-              <div className="text-[10px] text-[#00CED1]/80">Powered by CR AudioViz AI</div>
+        <div className="flex items-center justify-between h-16">
+          {/* Logo */}
+          <Link href="/" className="flex items-center space-x-3 group">
+            {/* Crystal Ball Logo Placeholder */}
+            <div className="relative w-10 h-10">
+              <div className="absolute inset-0 bg-gradient-to-br from-brand-cyan to-brand-navy rounded-full opacity-80 group-hover:opacity-100 transition-opacity">
+                <div className="absolute inset-1 bg-slate-900 rounded-full flex items-center justify-center">
+                  <TrendingUp className="w-5 h-5 text-brand-cyan" />
+                </div>
+              </div>
             </div>
+            <span className="text-xl font-bold gradient-text hidden sm:block">
+              Market Oracle
+            </span>
           </Link>
 
-          <div className="hidden lg:flex items-center space-x-1 overflow-x-auto">
-            {features.map((feature) => {
-              const isActive = pathname === feature.href
-              return (
-                <Link
-                  key={feature.href}
-                  href={feature.href}
-                  className={`flex items-center space-x-1 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                    isActive
-                      ? 'bg-[#00CED1]/20 text-[#00CED1] border border-[#00CED1]/30'
-                      : 'text-gray-400 hover:text-white hover:bg-slate-800 border border-transparent'
-                  }`}
-                >
-                  <span>{feature.icon}</span>
-                  <span>{feature.name}</span>
-                </Link>
-              )
-            })}
+          {/* Desktop Navigation */}
+          <div className="hidden lg:flex items-center space-x-1">
+            {navigationItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                  pathname === item.href
+                    ? 'bg-gradient-to-r from-brand-cyan/20 to-brand-navy/20 text-brand-cyan border border-brand-cyan/30'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                {item.name}
+              </Link>
+            ))}
           </div>
 
-          <button className="lg:hidden text-gray-400 hover:text-white">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+          {/* Mobile menu button */}
+          <button
+            type="button"
+            className="lg:hidden inline-flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          >
+            {mobileMenuOpen ? (
+              <X className="block h-6 w-6" />
+            ) : (
+              <Menu className="block h-6 w-6" />
+            )}
           </button>
         </div>
+
+        {/* Mobile menu */}
+        {mobileMenuOpen && (
+          <div className="lg:hidden pb-4">
+            <div className="space-y-1">
+              {navigationItems.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`block px-3 py-2 rounded-md text-base font-medium ${
+                    pathname === item.href
+                      ? 'bg-gradient-to-r from-brand-cyan/20 to-brand-navy/20 text-brand-cyan border-l-4 border-brand-cyan'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  {item.name}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </nav>
   )
