@@ -1,114 +1,179 @@
 'use client'
 
-import { useState } from 'react'
-import { Bell, Plus, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { createClient } from '@supabase/supabase-js'
+import Link from 'next/link'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+interface Alert {
+  id: string
+  symbol: string
+  type: 'price' | 'target' | 'confidence'
+  condition: string
+  value: number
+  isActive: boolean
+  triggered: boolean
+}
 
 export default function AlertsPage() {
-  const [alerts, setAlerts] = useState([
-    { id: 1, symbol: 'AAPL', type: 'Price Above', value: 180, active: true },
-    { id: 2, symbol: 'TSLA', type: 'Price Below', value: 150, active: true }
+  const [alerts, setAlerts] = useState<Alert[]>([
+    { id: '1', symbol: 'NVDA', type: 'price', condition: 'above', value: 470, isActive: true, triggered: false },
+    { id: '2', symbol: 'TSLA', type: 'target', condition: 'reached', value: 250, isActive: true, triggered: true }
   ])
-  const [newAlert, setNewAlert] = useState({ symbol: '', type: 'Price Above', value: 0 })
+  const [newSymbol, setNewSymbol] = useState('')
+  const [newValue, setNewValue] = useState(0)
+  const [loading, setLoading] = useState(false)
 
-  function addAlert() {
-    if (newAlert.symbol && newAlert.value > 0) {
-      setAlerts([...alerts, { ...newAlert, id: Date.now(), active: true }])
-      setNewAlert({ symbol: '', type: 'Price Above', value: 0 })
+  function createAlert() {
+    if (!newSymbol || newValue <= 0) return
+
+    const newAlert: Alert = {
+      id: Date.now().toString(),
+      symbol: newSymbol,
+      type: 'price',
+      condition: 'above',
+      value: newValue,
+      isActive: true,
+      triggered: false
     }
+
+    setAlerts(prev => [...prev, newAlert])
+    setNewSymbol('')
+    setNewValue(0)
   }
 
-  function removeAlert(id: number) {
-    setAlerts(alerts.filter(a => a.id !== id))
+  function deleteAlert(id: string) {
+    setAlerts(prev => prev.filter(a => a.id !== id))
   }
 
-  function toggleAlert(id: number) {
-    setAlerts(alerts.map(a => a.id === id ? { ...a, active: !a.active } : a))
+  function toggleAlert(id: string) {
+    setAlerts(prev => prev.map(a => a.id === id ? { ...a, isActive: !a.isActive } : a))
   }
 
   return (
-    <div className="space-y-8">
-      <div className="text-center mb-12">
-        <h1 className="text-5xl font-bold mb-4 flex items-center justify-center gap-4">
-          <Bell className="w-12 h-12 text-brand-cyan" />
-          <span className="gradient-text">Alerts</span>
-        </h1>
-        <p className="text-xl text-slate-300">Set up price alerts for your favorite stocks</p>
-      </div>
-
-      <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-800">
-        <h3 className="text-xl font-bold mb-4">Create New Alert</h3>
-        <div className="flex gap-4">
-          <input
-            type="text"
-            placeholder="Symbol (e.g., AAPL)"
-            value={newAlert.symbol}
-            onChange={(e) => setNewAlert({ ...newAlert, symbol: e.target.value.toUpperCase() })}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white flex-1"
-          />
-          <select
-            value={newAlert.type}
-            onChange={(e) => setNewAlert({ ...newAlert, type: e.target.value })}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
-          >
-            <option>Price Above</option>
-            <option>Price Below</option>
-            <option>Confidence Change</option>
-            <option>AI Consensus</option>
-          </select>
-          <input
-            type="number"
-            placeholder="Value"
-            value={newAlert.value || ''}
-            onChange={(e) => setNewAlert({ ...newAlert, value: parseFloat(e.target.value) })}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white w-32"
-          />
-          <button
-            onClick={addAlert}
-            className="px-6 py-2 bg-gradient-to-r from-brand-cyan to-blue-500 hover:from-brand-cyan/80 hover:to-blue-500/80 rounded-lg font-semibold flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Add Alert
-          </button>
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-8">
+          <Link href="/" className="text-blue-400 hover:text-blue-300 mb-4 inline-block">
+            ← Back to Dashboard
+          </Link>
+          <h1 className="text-4xl font-bold text-white mb-2">Price Alerts</h1>
+          <p className="text-gray-300">Get notified when stocks hit your target prices</p>
         </div>
-      </div>
 
-      <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-800">
-        <h3 className="text-xl font-bold mb-4">Your Alerts ({alerts.length})</h3>
-        {alerts.length === 0 ? (
-          <div className="text-center py-16">
-            <Bell className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-            <p className="text-slate-400">No alerts set up yet</p>
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+            <div className="text-gray-300 text-sm mb-1">Active Alerts</div>
+            <div className="text-3xl font-bold text-white">{alerts.filter(a => a.isActive).length}</div>
           </div>
-        ) : (
-          <div className="space-y-3">
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+            <div className="text-gray-300 text-sm mb-1">Triggered Today</div>
+            <div className="text-3xl font-bold text-green-400">{alerts.filter(a => a.triggered).length}</div>
+          </div>
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+            <div className="text-gray-300 text-sm mb-1">Total Alerts</div>
+            <div className="text-3xl font-bold text-blue-400">{alerts.length}</div>
+          </div>
+        </div>
+
+        {/* Create New Alert */}
+        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 mb-8">
+          <h2 className="text-2xl font-bold text-white mb-6">Create New Alert</h2>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <input
+              type="text"
+              value={newSymbol}
+              onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+              placeholder="Symbol (e.g., NVDA)"
+              className="bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400"
+            />
+            <select className="bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white">
+              <option>Price Above</option>
+              <option>Price Below</option>
+              <option>Target Reached</option>
+            </select>
+            <input
+              type="number"
+              value={newValue}
+              onChange={(e) => setNewValue(parseFloat(e.target.value))}
+              placeholder="Price"
+              className="bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400"
+            />
+            <button
+              onClick={createAlert}
+              className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition"
+            >
+              Create Alert
+            </button>
+          </div>
+        </div>
+
+        {/* Alerts List */}
+        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 mb-8">
+          <h2 className="text-2xl font-bold text-white mb-6">Your Alerts</h2>
+          <div className="space-y-4">
             {alerts.map(alert => (
-              <div key={alert.id} className="bg-slate-800/50 rounded-lg p-4 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => toggleAlert(alert.id)}
-                    className={`w-12 h-6 rounded-full transition-colors ${
-                      alert.active ? 'bg-green-500' : 'bg-slate-600'
-                    }`}
-                  >
-                    <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                      alert.active ? 'translate-x-6' : 'translate-x-1'
-                    }`}></div>
-                  </button>
-                  <div>
-                    <p className="font-bold">{alert.symbol}</p>
-                    <p className="text-sm text-slate-400">{alert.type}: ${alert.value}</p>
+              <div key={alert.id} className={`p-6 rounded-xl border ${
+                alert.triggered 
+                  ? 'bg-green-500/10 border-green-400' 
+                  : alert.isActive
+                  ? 'bg-white/5 border-white/10'
+                  : 'bg-gray-500/10 border-gray-600'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="text-2xl font-bold text-white">{alert.symbol}</div>
+                    <div className="text-gray-300">
+                      {alert.type === 'price' && `Price ${alert.condition} $${alert.value}`}
+                      {alert.type === 'target' && `Target $${alert.value} reached`}
+                    </div>
+                    {alert.triggered && (
+                      <span className="px-3 py-1 rounded-full text-sm font-semibold bg-green-500/20 text-green-300">
+                        ✓ Triggered
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => toggleAlert(alert.id)}
+                      className={`px-4 py-2 rounded-lg font-semibold transition ${
+                        alert.isActive
+                          ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30'
+                          : 'bg-gray-500/20 text-gray-400 hover:bg-gray-500/30'
+                      }`}
+                    >
+                      {alert.isActive ? 'Active' : 'Paused'}
+                    </button>
+                    <button
+                      onClick={() => deleteAlert(alert.id)}
+                      className="px-4 py-2 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => removeAlert(alert.id)}
-                  className="p-2 hover:bg-red-500/20 rounded-lg transition-colors"
-                >
-                  <X className="w-5 h-5 text-red-400" />
-                </button>
               </div>
             ))}
           </div>
-        )}
+        </div>
+
+        {/* What This Means */}
+        <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 backdrop-blur-sm rounded-xl p-8 border border-white/20">
+          <h2 className="text-2xl font-bold text-white mb-4">💡 What This Means</h2>
+          <div className="space-y-4 text-gray-300">
+            <p>
+              <strong className="text-white">Price Alerts:</strong> Automated notifications when stocks hit your target prices. Never miss an opportunity again.
+            </p>
+            <p>
+              <strong className="text-white">Smart Monitoring:</strong> Set alerts for entry points, exit targets, or stop-losses. The system watches 24/7 so you don't have to.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   )
