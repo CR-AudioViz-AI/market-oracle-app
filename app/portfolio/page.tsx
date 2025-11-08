@@ -1,182 +1,428 @@
-"use client"
+'use client';
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useState, useEffect } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { TrendingUp, TrendingDown, DollarSign, Target, Percent, Activity, Eye, EyeOff } from 'lucide-react';
+
+interface Position {
+  id: string;
+  ticker: string;
+  ai_name: string;
+  shares: number;
+  entry_price: number;
+  current_price: number | null;
+  target_price: number;
+  entry_date: string;
+  reasoning: string;
+  confidence: number;
+}
 
 export default function PortfolioPage() {
-  const [picks, setPicks] = useState<any[]>([])
-  const [stats, setStats] = useState({
-    totalPicks: 0,
-    totalValue: 0,
-    avgGain: 0,
-    bestPick: { symbol: '', gain: 0 },
-    worstPick: { symbol: '', gain: 0 }
-  })
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [expandedPosition, setExpandedPosition] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedBox, setSelectedBox] = useState<string | null>(null);
+  const supabase = createClientComponentClient();
+
+  const [summary, setSummary] = useState({
+    totalEntryValue: 0,
+    totalCurrentValue: 0,
+    totalTargetValue: 0,
+    totalGainLoss: 0,
+    totalGainLossPercent: 0,
+    totalUnrealizedGain: 0,
+    bestPosition: null as Position | null,
+    worstPosition: null as Position | null,
+  });
 
   useEffect(() => {
-    fetchPortfolio()
-  }, [])
+    loadPositions();
+    const interval = setInterval(loadPositions, 300000);
+    return () => clearInterval(interval);
+  }, []);
 
-  async function fetchPortfolio() {
-    const { data } = await supabase
-      .from('stock_picks')
-      .select('*')
-      .order('created_at', { ascending: false })
+  const loadPositions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('paper_trades')
+        .select('*')
+        .eq('status', 'open')
+        .order('entry_date', { ascending: false });
 
-    if (data) {
-      setPicks(data)
-      
-      // Calculate stats
-      const gains = data.map(pick => {
-        const gain = ((pick.target_price - pick.entry_price) / pick.entry_price) * 100
-        return { symbol: pick.symbol, gain }
-      })
-      
-      const totalGain = gains.reduce((sum, item) => sum + item.gain, 0)
-      const best = gains.reduce((max, item) => item.gain > max.gain ? item : max, gains[0] || { gain: 0 })
-      const worst = gains.reduce((min, item) => item.gain < min.gain ? item : min, gains[0] || { gain: 0 })
+      if (error) throw error;
 
-      setStats({
-        totalPicks: data.length,
-        totalValue: data.reduce((sum, pick) => sum + pick.entry_price, 0),
-        avgGain: totalGain / data.length,
-        bestPick: best,
-        worstPick: worst
-      })
+      if (data) {
+        setPositions(data as Position[]);
+        calculateSummary(data as Position[]);
+      }
+      setLoading(false);
+    } catch (error) {
+      console.error('Error loading positions:', error);
+      setLoading(false);
     }
+  };
+
+  const calculateSummary = (data: Position[]) => {
+    const totalEntry = data.reduce((sum, p) => sum + (p.shares * p.entry_price), 0);
+    const totalCurrent = data.reduce((sum, p) => sum + (p.shares * (p.current_price || p.entry_price)), 0);
+    const totalTarget = data.reduce((sum, p) => sum + (p.shares * p.target_price), 0);
+    const gainLoss = totalCurrent - totalEntry;
+    const gainLossPercent = totalEntry > 0 ? (gainLoss / totalEntry) * 100 : 0;
+    const unrealizedGain = totalTarget - totalCurrent;
+
+    // Find best and worst positions
+    const positionsWithGains = data
+      .map(p => ({
+        ...p,
+        gain: p.current_price ? ((p.current_price - p.entry_price) / p.entry_price) * 100 : 0
+      }))
+      .sort((a, b) => b.gain - a.gain);
+
+    setSummary({
+      totalEntryValue: totalEntry,
+      totalCurrentValue: totalCurrent,
+      totalTargetValue: totalTarget,
+      totalGainLoss: gainLoss,
+      totalGainLossPercent: gainLossPercent,
+      totalUnrealizedGain: unrealizedGain,
+      bestPosition: positionsWithGains[0] || null,
+      worstPosition: positionsWithGains[positionsWithGains.length - 1] || null,
+    });
+  };
+
+  const toggleExpand = (positionId: string) => {
+    setExpandedPosition(expandedPosition === positionId ? null : positionId);
+  };
+
+  const showBoxDetail = (boxType: string) => {
+    setSelectedBox(selectedBox === boxType ? null : boxType);
+  };
+
+  const getPositionsForBox = (boxType: string) => {
+    switch (boxType) {
+      case 'entry':
+        return positions.sort((a, b) => (b.shares * b.entry_price) - (a.shares * a.entry_price));
+      case 'current':
+        return positions.sort((a, b) => 
+          (b.shares * (b.current_price || b.entry_price)) - (a.shares * (a.current_price || a.entry_price))
+        );
+      case 'target':
+        return positions.sort((a, b) => (b.shares * b.target_price) - (a.shares * a.target_price));
+      case 'gainers':
+        return positions
+          .filter(p => p.current_price && p.current_price > p.entry_price)
+          .sort((a, b) => {
+            const gainA = a.current_price ? ((a.current_price - a.entry_price) / a.entry_price) : 0;
+            const gainB = b.current_price ? ((b.current_price - b.entry_price) / b.entry_price) : 0;
+            return gainB - gainA;
+          });
+      case 'losers':
+        return positions
+          .filter(p => p.current_price && p.current_price < p.entry_price)
+          .sort((a, b) => {
+            const lossA = a.current_price ? ((a.current_price - a.entry_price) / a.entry_price) : 0;
+            const lossB = b.current_price ? ((b.current_price - b.entry_price) / b.entry_price) : 0;
+            return lossA - lossB;
+          });
+      default:
+        return positions;
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Activity className="w-12 h-12 animate-pulse mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Loading portfolio...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
-      {/* Intro for 21-year-olds */}
+    <div className="container mx-auto px-4 py-8 mt-20">
       <div className="mb-8">
-        <h1 className="text-5xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent mb-4">
-          📊 Your Portfolio
-        </h1>
-        <p className="text-xl text-gray-300 mb-2">
-          Track ALL the AI stock picks in one place
-        </p>
-        <p className="text-gray-400">
-          Think of this as your trading dashboard - see which AI picks are crushing it 🚀 and which ones are flopping 📉
-        </p>
+        <h1 className="text-3xl font-bold mb-2">💼 My Portfolio</h1>
+        <p className="text-gray-600">Your paper trading positions with live performance tracking</p>
+        <p className="text-sm text-gray-500 mt-1">Click any summary box for detailed breakdown</p>
       </div>
 
-      {/* Quick Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-        <div className="bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-xl p-6 border border-purple-500/30">
-          <div className="text-sm text-gray-400 mb-2">Total Picks</div>
-          <div className="text-3xl font-bold text-white">{stats.totalPicks}</div>
-          <div className="text-xs text-purple-300 mt-1">All AI predictions</div>
-        </div>
+      {/* Summary Boxes - Clickable */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+        <Card 
+          className="border-2 border-blue-200 hover:shadow-xl transition-all cursor-pointer"
+          onClick={() => showBoxDetail('entry')}
+        >
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Total Entry Value</CardTitle>
+              <DollarSign className="w-5 h-5 text-blue-500" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-blue-600">${summary.totalEntryValue.toFixed(2)}</p>
+            <p className="text-xs text-gray-500 mt-1">Sum of all purchases</p>
+            {selectedBox === 'entry' && <Eye className="w-4 h-4 text-blue-500 mt-2" />}
+          </CardContent>
+        </Card>
 
-        <div className="bg-gradient-to-br from-green-500/20 to-emerald-500/20 rounded-xl p-6 border border-green-500/30">
-          <div className="text-sm text-gray-400 mb-2">Avg Expected Gain</div>
-          <div className="text-3xl font-bold text-green-400">+{stats.avgGain.toFixed(1)}%</div>
-          <div className="text-xs text-green-300 mt-1">Average upside</div>
-        </div>
+        <Card 
+          className="border-2 border-green-200 hover:shadow-xl transition-all cursor-pointer"
+          onClick={() => showBoxDetail('current')}
+        >
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Current Value</CardTitle>
+              <Activity className="w-5 h-5 text-green-500" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-green-600">${summary.totalCurrentValue.toFixed(2)}</p>
+            <div className={`text-sm font-semibold mt-1 ${summary.totalGainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {summary.totalGainLoss >= 0 ? '+' : ''}${summary.totalGainLoss.toFixed(2)} 
+              ({summary.totalGainLoss >= 0 ? '+' : ''}{summary.totalGainLossPercent.toFixed(2)}%)
+            </div>
+            {selectedBox === 'current' && <Eye className="w-4 h-4 text-green-500 mt-2" />}
+          </CardContent>
+        </Card>
 
-        <div className="bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl p-6 border border-blue-500/30">
-          <div className="text-sm text-gray-400 mb-2">Total Value</div>
-          <div className="text-3xl font-bold text-white">${stats.totalValue.toFixed(0)}</div>
-          <div className="text-xs text-blue-300 mt-1">If you bought all</div>
-        </div>
+        <Card 
+          className="border-2 border-purple-200 hover:shadow-xl transition-all cursor-pointer"
+          onClick={() => showBoxDetail('target')}
+        >
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Target Value</CardTitle>
+              <Target className="w-5 h-5 text-purple-500" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-purple-600">${summary.totalTargetValue.toFixed(2)}</p>
+            <p className="text-xs text-gray-500 mt-1">Unrealized: ${summary.totalUnrealizedGain.toFixed(2)}</p>
+            {selectedBox === 'target' && <Eye className="w-4 h-4 text-purple-500 mt-2" />}
+          </CardContent>
+        </Card>
 
-        <div className="bg-gradient-to-br from-yellow-500/20 to-orange-500/20 rounded-xl p-6 border border-yellow-500/30">
-          <div className="text-sm text-gray-400 mb-2">Best Pick</div>
-          <div className="text-2xl font-bold text-white">${stats.bestPick.symbol}</div>
-          <div className="text-lg font-bold text-green-400">+{stats.bestPick.gain.toFixed(1)}%</div>
-        </div>
+        <Card 
+          className="border-2 border-green-300 hover:shadow-xl transition-all cursor-pointer bg-green-50"
+          onClick={() => showBoxDetail('gainers')}
+        >
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-green-700">Best Position</CardTitle>
+              <TrendingUp className="w-5 h-5 text-green-600" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            {summary.bestPosition ? (
+              <>
+                <p className="text-xl font-bold text-green-700">{summary.bestPosition.ticker}</p>
+                <p className="text-lg font-semibold text-green-600">
+                  +{((summary.bestPosition.current_price! - summary.bestPosition.entry_price) / summary.bestPosition.entry_price * 100).toFixed(2)}%
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-gray-500">No data</p>
+            )}
+            {selectedBox === 'gainers' && <Eye className="w-4 h-4 text-green-500 mt-2" />}
+          </CardContent>
+        </Card>
 
-        <div className="bg-gradient-to-br from-red-500/20 to-pink-500/20 rounded-xl p-6 border border-red-500/30">
-          <div className="text-sm text-gray-400 mb-2">Worst Pick</div>
-          <div className="text-2xl font-bold text-white">${stats.worstPick.symbol}</div>
-          <div className="text-lg font-bold text-red-400">{stats.worstPick.gain.toFixed(1)}%</div>
-        </div>
+        <Card 
+          className="border-2 border-red-300 hover:shadow-xl transition-all cursor-pointer bg-red-50"
+          onClick={() => showBoxDetail('losers')}
+        >
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-red-700">Worst Position</CardTitle>
+              <TrendingDown className="w-5 h-5 text-red-600" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            {summary.worstPosition ? (
+              <>
+                <p className="text-xl font-bold text-red-700">{summary.worstPosition.ticker}</p>
+                <p className="text-lg font-semibold text-red-600">
+                  {((summary.worstPosition.current_price! - summary.worstPosition.entry_price) / summary.worstPosition.entry_price * 100).toFixed(2)}%
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-gray-500">No data</p>
+            )}
+            {selectedBox === 'losers' && <Eye className="w-4 h-4 text-red-500 mt-2" />}
+          </CardContent>
+        </Card>
       </div>
 
-      {/* What This Means (Educational) */}
-      <div className="bg-slate-800/50 rounded-xl p-6 border border-purple-500/20 mb-8">
-        <h2 className="text-2xl font-bold mb-4">💡 What You&apos;re Looking At</h2>
-        <div className="grid md:grid-cols-3 gap-6 text-gray-300">
-          <div>
-            <div className="text-lg font-bold text-purple-400 mb-2">Total Picks</div>
-            <p className="text-sm">Every stock that our 5 AIs have recommended. More picks = more opportunities to find winners.</p>
-          </div>
-          <div>
-            <div className="text-lg font-bold text-green-400 mb-2">Expected Gain</div>
-            <p className="text-sm">The average % profit the AIs think you could make. This is their target price vs. entry price. Higher = better!</p>
-          </div>
-          <div>
-            <div className="text-lg font-bold text-blue-400 mb-2">Portfolio Value</div>
-            <p className="text-sm">If you bought 1 share of every pick, this is what you&apos;d spend. Helps you budget your investment.</p>
-          </div>
-        </div>
-      </div>
+      {/* Box Detail View */}
+      {selectedBox && (
+        <Card className="mb-8 border-2 border-blue-400">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>
+                {selectedBox === 'entry' && 'Entry Value Breakdown'}
+                {selectedBox === 'current' && 'Current Value Breakdown'}
+                {selectedBox === 'target' && 'Target Value Breakdown'}
+                {selectedBox === 'gainers' && 'Top Gainers'}
+                {selectedBox === 'losers' && 'Top Losers'}
+              </CardTitle>
+              <Button onClick={() => setSelectedBox(null)} variant="ghost" size="sm">
+                <EyeOff className="w-4 h-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {getPositionsForBox(selectedBox).slice(0, 10).map(pos => {
+                const entryValue = pos.shares * pos.entry_price;
+                const currentValue = pos.shares * (pos.current_price || pos.entry_price);
+                const targetValue = pos.shares * pos.target_price;
+                const gain = pos.current_price ? ((pos.current_price - pos.entry_price) / pos.entry_price) * 100 : 0;
 
-      {/* All Picks Table */}
-      <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20">
-        <h2 className="text-3xl font-bold mb-6">All Picks Breakdown</h2>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="border-b border-gray-700">
-              <tr>
-                <th className="pb-4 text-gray-400 font-semibold">Stock</th>
-                <th className="pb-4 text-gray-400 font-semibold">AI</th>
-                <th className="pb-4 text-gray-400 font-semibold">Entry Price</th>
-                <th className="pb-4 text-gray-400 font-semibold">Target Price</th>
-                <th className="pb-4 text-gray-400 font-semibold">Expected Gain</th>
-                <th className="pb-4 text-gray-400 font-semibold">Confidence</th>
-                <th className="pb-4 text-gray-400 font-semibold">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {picks.slice(0, 20).map((pick, idx) => {
-                const gain = ((pick.target_price - pick.entry_price) / pick.entry_price) * 100
                 return (
-                  <tr key={idx} className="border-b border-gray-800 hover:bg-slate-700/30 transition">
-                    <td className="py-4 font-bold text-white">${pick.symbol}</td>
-                    <td className="py-4">
-                      <span className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-sm">
-                        {pick.ai_name}
-                      </span>
-                    </td>
-                    <td className="py-4 text-blue-400">${pick.entry_price.toFixed(2)}</td>
-                    <td className="py-4 text-green-400">${pick.target_price.toFixed(2)}</td>
-                    <td className="py-4">
-                      <span className={`font-bold ${gain >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {gain >= 0 ? '+' : ''}{gain.toFixed(1)}%
-                      </span>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 bg-gray-700 rounded-full h-2">
-                          <div 
-                            className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full"
-                            style={{ width: `${pick.confidence_score}%` }}
-                          ></div>
-                        </div>
-                        <span className="text-sm text-gray-400">{pick.confidence_score}%</span>
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        pick.status === 'OPEN' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'
-                      }`}>
-                        {pick.status}
-                      </span>
-                    </td>
-                  </tr>
-                )
+                  <div key={pos.id} className="flex items-center justify-between p-3 bg-gray-50 rounded">
+                    <div className="flex-1">
+                      <span className="font-bold">{pos.ticker}</span>
+                      <span className="text-sm text-gray-600 ml-2">({pos.shares} shares)</span>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold">
+                        {selectedBox === 'entry' && `$${entryValue.toFixed(2)}`}
+                        {selectedBox === 'current' && `$${currentValue.toFixed(2)}`}
+                        {selectedBox === 'target' && `$${targetValue.toFixed(2)}`}
+                        {(selectedBox === 'gainers' || selectedBox === 'losers') && (
+                          <span className={gain >= 0 ? 'text-green-600' : 'text-red-600'}>
+                            {gain >= 0 ? '+' : ''}{gain.toFixed(2)}%
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                );
               })}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-        <div className="mt-6 text-center text-gray-400">
-          Showing 20 of {stats.totalPicks} total picks
-        </div>
-      </div>
+      {/* Positions Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Your Positions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {positions.length === 0 ? (
+            <p className="text-center text-gray-500 py-8">No open positions</p>
+          ) : (
+            <div className="space-y-4">
+              {positions.map(position => {
+                const entryValue = position.shares * position.entry_price;
+                const currentValue = position.shares * (position.current_price || position.entry_price);
+                const targetValue = position.shares * position.target_price;
+                const gainLoss = currentValue - entryValue;
+                const gainLossPercent = (gainLoss / entryValue) * 100;
+                const isExpanded = expandedPosition === position.id;
+
+                return (
+                  <Card 
+                    key={position.id}
+                    className="hover:shadow-lg transition-all cursor-pointer"
+                    onClick={() => toggleExpand(position.id)}
+                  >
+                    <CardContent className="pt-6">
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                        {/* Ticker */}
+                        <div className="md:col-span-2">
+                          <h3 className="text-2xl font-bold">{position.ticker}</h3>
+                          <p className="text-sm text-gray-600">{position.shares} shares</p>
+                          <Badge className="mt-1 text-xs">{position.ai_name}</Badge>
+                        </div>
+
+                        {/* Entry Price */}
+                        <div className="md:col-span-2 text-center">
+                          <p className="text-xs text-gray-600 mb-1">Entry Price</p>
+                          <p className="text-lg font-bold text-blue-600">${position.entry_price.toFixed(2)}</p>
+                          <p className="text-xs text-gray-500">${entryValue.toFixed(2)}</p>
+                        </div>
+
+                        {/* Current Price */}
+                        <div className="md:col-span-2 text-center">
+                          <p className="text-xs text-gray-600 mb-1">Current Price</p>
+                          <p className="text-lg font-bold">
+                            {position.current_price ? `$${position.current_price.toFixed(2)}` : 'Loading...'}
+                          </p>
+                          <p className="text-xs text-gray-500">${currentValue.toFixed(2)}</p>
+                        </div>
+
+                        {/* Target Price */}
+                        <div className="md:col-span-2 text-center">
+                          <p className="text-xs text-gray-600 mb-1">Target Price</p>
+                          <p className="text-lg font-bold text-green-600">${position.target_price.toFixed(2)}</p>
+                          <p className="text-xs text-gray-500">${targetValue.toFixed(2)}</p>
+                        </div>
+
+                        {/* Gain/Loss */}
+                        <div className="md:col-span-2 text-center">
+                          <p className="text-xs text-gray-600 mb-1">Gain/Loss</p>
+                          <p className={`text-lg font-bold ${gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {gainLoss >= 0 ? '+' : ''}${gainLoss.toFixed(2)}
+                          </p>
+                          <p className={`text-sm font-semibold ${gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {gainLoss >= 0 ? '+' : ''}{gainLossPercent.toFixed(2)}%
+                          </p>
+                        </div>
+
+                        {/* Confidence */}
+                        <div className="md:col-span-2 text-center">
+                          <p className="text-xs text-gray-600 mb-1">AI Confidence</p>
+                          <p className="text-lg font-bold">{position.confidence}%</p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(position.entry_date).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Expanded Details */}
+                      {isExpanded && (
+                        <div className="mt-4 pt-4 border-t bg-gray-50 p-4 rounded-lg">
+                          <h4 className="font-semibold mb-2">Position Details:</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                            <div>
+                              <span className="text-gray-600 block">Entry Date:</span>
+                              <p className="font-semibold">{new Date(position.entry_date).toLocaleDateString()}</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-600 block">Entry Value:</span>
+                              <p className="font-semibold">${entryValue.toFixed(2)}</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-600 block">Current Value:</span>
+                              <p className="font-semibold">${currentValue.toFixed(2)}</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-600 block">Target Value:</span>
+                              <p className="font-semibold">${targetValue.toFixed(2)}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="bg-blue-50 p-3 rounded border border-blue-200">
+                            <p className="text-xs font-semibold text-blue-900 mb-1">Why This Position:</p>
+                            <p className="text-sm text-gray-700 leading-relaxed">{position.reasoning}</p>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
-  )
+  );
 }
