@@ -1,397 +1,511 @@
-"use client"
+'use client';
 
-import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useState, useEffect } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { TrendingUp, TrendingDown, DollarSign, Percent, Activity, ChevronDown, ChevronUp, Filter } from 'lucide-react';
+
+interface BacktestResult {
+  id: string;
+  ticker: string;
+  ai_name: string;
+  entry_price: number;
+  current_price: number | null;
+  target_price: number;
+  entry_date: string;
+  exit_date: string | null;
+  actual_return: number;
+  expected_return: number;
+  days_held: number;
+  confidence: number;
+  reasoning: string;
+  status: 'open' | 'closed' | 'target_hit';
+}
 
 export default function BacktestingPage() {
-  const [selectedAI, setSelectedAI] = useState('all')
-  const [timeframe, setTimeframe] = useState('30')
-  const [startingCapital, setStartingCapital] = useState(10000)
-  const [isRunning, setIsRunning] = useState(false)
-  const [results, setResults] = useState<any>(null)
-  const [aiOptions, setAiOptions] = useState<string[]>([])
-  
+  const [results, setResults] = useState<BacktestResult[]>([]);
+  const [filteredResults, setFilteredResults] = useState<BacktestResult[]>([]);
+  const [aiFilter, setAiFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [performanceFilter, setPerformanceFilter] = useState('all');
+  const [aiOptions, setAiOptions] = useState<string[]>(['all']);
+  const [expandedResult, setExpandedResult] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const supabase = createClientComponentClient();
+
+  const [metrics, setMetrics] = useState({
+    totalTrades: 0,
+    winRate: 0,
+    avgReturn: 0,
+    totalProfit: 0,
+    bestTrade: null as BacktestResult | null,
+    worstTrade: null as BacktestResult | null,
+    avgDaysHeld: 0,
+    totalEntryValue: 0,
+    totalCurrentValue: 0,
+    totalTargetValue: 0,
+  });
+
   useEffect(() => {
-    fetchAIModels()
-  }, [])
+    loadBacktestResults();
+  }, []);
 
-  async function fetchAIModels() {
-    const { data } = await supabase
-      .from('stock_picks')
-      .select('ai_name')
-    
-    if (data) {
-      const unique = Array.from(new Set(data.map((d: any) => d.ai_name))) as string[] as string[]
-      setAiOptions(['all', ...unique])
-    }
-  }
+  useEffect(() => {
+    filterResults();
+  }, [results, aiFilter, statusFilter, performanceFilter]);
 
-  async function runBacktest() {
-    setIsRunning(true)
-    
+  const loadBacktestResults = async () => {
     try {
-      // Calculate date range
-      const endDate = new Date()
-      const startDate = new Date()
-      startDate.setDate(startDate.getDate() - parseInt(timeframe))
-      
-      // Fetch historical picks
-      let query = supabase
-        .from('stock_picks')
+      const { data, error } = await supabase
+        .from('ai_stock_picks')
         .select('*')
-        .gte('created_at', startDate.toISOString())
-        .lte('created_at', endDate.toISOString())
-      
-      if (selectedAI !== 'all') {
-        query = query.eq('ai_name', selectedAI)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        const processedResults = data.map((pick: any) => {
+          const actualReturn = pick.current_price && pick.price
+            ? ((pick.current_price - pick.price) / pick.price) * 100
+            : 0;
+          const expectedReturn = pick.target_price && pick.price
+            ? ((pick.target_price - pick.price) / pick.price) * 100
+            : 0;
+          
+          const entryDate = new Date(pick.created_at);
+          const exitDate = pick.exit_date ? new Date(pick.exit_date) : new Date();
+          const daysHeld = Math.floor((exitDate.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
+
+          let status: 'open' | 'closed' | 'target_hit' = 'open';
+          if (pick.current_price && pick.target_price && pick.current_price >= pick.target_price) {
+            status = 'target_hit';
+          } else if (pick.exit_date) {
+            status = 'closed';
+          }
+
+          return {
+            id: pick.id,
+            ticker: pick.ticker,
+            ai_name: pick.ai_name,
+            entry_price: pick.price,
+            current_price: pick.current_price,
+            target_price: pick.target_price,
+            entry_date: pick.created_at,
+            exit_date: pick.exit_date,
+            actual_return: actualReturn,
+            expected_return: expectedReturn,
+            days_held: daysHeld,
+            confidence: pick.confidence,
+            reasoning: pick.reasoning,
+            status
+          };
+        });
+
+        setResults(processedResults);
+        calculateMetrics(processedResults);
+
+        const unique = Array.from(new Set(data.map((d: any) => d.ai_name))) as string[];
+        setAiOptions(['all', ...unique]);
       }
-      
-      const { data: picks } = await query
-      
-      if (!picks || picks.length === 0) {
-        setResults({
-          error: 'No picks found for this timeframe',
-          totalTrades: 0
-        })
-        setIsRunning(false)
-        return
-      }
-      
-      // Calculate backtest metrics
-      let capital = startingCapital
-      let wins = 0
-      let losses = 0
-      const trades: any[] = []
-      let maxGain = 0
-      let maxLoss = 0
-      let totalGainPercent = 0
-      
-      picks.forEach(pick => {
-        // Simulate trade entry
-        const entryPrice = pick.entry_price
-        const targetPrice = pick.target_price
-        const currentPrice = pick.current_price || pick.entry_price
-        
-        // Calculate position size (5% of capital per trade)
-        const positionSize = capital * 0.05
-        const shares = Math.floor(positionSize / entryPrice)
-        const investedAmount = shares * entryPrice
-        
-        if (investedAmount === 0) return
-        
-        // Determine if trade hit target or current status
-        let exitPrice = currentPrice
-        let returnPercent = ((exitPrice - entryPrice) / entryPrice) * 100
-        let profit = (exitPrice - entryPrice) * shares
-        
-        // Track wins/losses
-        if (returnPercent > 0) {
-          wins++
-        } else {
-          losses++
-        }
-        
-        // Update capital
-        capital += profit
-        
-        // Track max gain/loss
-        if (returnPercent > maxGain) maxGain = returnPercent
-        if (returnPercent < maxLoss) maxLoss = returnPercent
-        
-        totalGainPercent += returnPercent
-        
-        trades.push({
-          symbol: pick.symbol,
-          ai: pick.ai_name,
-          entryPrice,
-          exitPrice,
-          returnPercent,
-          profit,
-          date: new Date(pick.created_at).toLocaleDateString()
-        })
-      })
-      
-      const totalTrades = picks.length
-      const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0
-      const avgGain = totalTrades > 0 ? totalGainPercent / totalTrades : 0
-      const finalCapital = capital
-      const totalProfit = finalCapital - startingCapital
-      const totalReturn = ((finalCapital - startingCapital) / startingCapital) * 100
-      
-      // Calculate Sharpe Ratio (simplified)
-      const returns = trades.map((t: any) => t.returnPercent)
-      const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length
-      const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length
-      const stdDev = Math.sqrt(variance)
-      const sharpeRatio = stdDev > 0 ? avgReturn / stdDev : 0
-      
-      setResults({
-        totalTrades,
-        wins,
-        losses,
-        winRate: winRate.toFixed(2),
-        avgGain: avgGain.toFixed(2),
-        maxGain: maxGain.toFixed(2),
-        maxLoss: maxLoss.toFixed(2),
-        sharpeRatio: sharpeRatio.toFixed(2),
-        startingCapital: startingCapital.toFixed(2),
-        finalCapital: finalCapital.toFixed(2),
-        totalProfit: totalProfit.toFixed(2),
-        totalReturn: totalReturn.toFixed(2),
-        trades: trades.slice(0, 10), // Show last 10 trades
-        timeframeUsed: timeframe,
-        aiUsed: selectedAI
-      })
-      
+      setLoading(false);
     } catch (error) {
-      console.error('Backtest error:', error)
-      setResults({
-        error: 'Failed to run backtest. Please try again.'
-      })
+      console.error('Error loading backtest results:', error);
+      setLoading(false);
     }
+  };
+
+  const calculateMetrics = (data: BacktestResult[]) => {
+    const totalTrades = data.length;
+    const winners = data.filter(r => r.actual_return > 0);
+    const winRate = totalTrades > 0 ? (winners.length / totalTrades) * 100 : 0;
+    const avgReturn = totalTrades > 0 
+      ? data.reduce((sum, r) => sum + r.actual_return, 0) / totalTrades 
+      : 0;
     
-    setIsRunning(false)
+    const totalEntry = data.reduce((sum, r) => sum + r.entry_price, 0);
+    const totalCurrent = data.reduce((sum, r) => sum + (r.current_price || r.entry_price), 0);
+    const totalTarget = data.reduce((sum, r) => sum + r.target_price, 0);
+    const totalProfit = totalCurrent - totalEntry;
+
+    const avgDays = totalTrades > 0
+      ? data.reduce((sum, r) => sum + r.days_held, 0) / totalTrades
+      : 0;
+
+    const sorted = [...data].sort((a, b) => b.actual_return - a.actual_return);
+
+    setMetrics({
+      totalTrades,
+      winRate,
+      avgReturn,
+      totalProfit,
+      bestTrade: sorted[0] || null,
+      worstTrade: sorted[sorted.length - 1] || null,
+      avgDaysHeld: avgDays,
+      totalEntryValue: totalEntry,
+      totalCurrentValue: totalCurrent,
+      totalTargetValue: totalTarget,
+    });
+  };
+
+  const filterResults = () => {
+    let filtered = [...results];
+
+    if (aiFilter !== 'all') {
+      filtered = filtered.filter(r => r.ai_name === aiFilter);
+    }
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(r => r.status === statusFilter);
+    }
+
+    if (performanceFilter === 'winners') {
+      filtered = filtered.filter(r => r.actual_return > 0);
+    } else if (performanceFilter === 'losers') {
+      filtered = filtered.filter(r => r.actual_return < 0);
+    } else if (performanceFilter === 'target_hit') {
+      filtered = filtered.filter(r => r.status === 'target_hit');
+    }
+
+    setFilteredResults(filtered);
+  };
+
+  const toggleExpand = (resultId: string) => {
+    setExpandedResult(expandedResult === resultId ? null : resultId);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Activity className="w-12 h-12 animate-pulse mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Loading backtest results...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
+    <div className="container mx-auto px-4 py-8 mt-20">
       <div className="mb-8">
-        <h1 className="text-5xl font-bold bg-gradient-to-r from-orange-400 via-amber-400 to-yellow-400 bg-clip-text text-transparent mb-4">
-          📈 Backtesting Lab
-        </h1>
-        <p className="text-xl text-gray-300 mb-2">
-          Test AI strategies on historical data - See what would have happened
-        </p>
-        <p className="text-gray-400">
-          Time travel for traders! See if following an AI would have made you rich 💰
-        </p>
+        <h1 className="text-3xl font-bold mb-2">🔍 Backtesting Analysis</h1>
+        <p className="text-gray-600">Historical performance analysis of AI stock picks</p>
       </div>
 
-      {/* Strategy Selector */}
-      <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20 mb-8">
-        <h2 className="text-2xl font-bold mb-6">⚙️ Configure Backtest</h2>
-        <div className="grid md:grid-cols-3 gap-6">
-          <div>
-            <label className="text-sm text-gray-400 mb-2 block">Select AI</label>
-            <select 
-              value={selectedAI}
-              onChange={(e) => setSelectedAI(e.target.value)}
-              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-3 text-white"
-            >
-              {aiOptions.map((ai: any) => (
-                <option key={ai} value={ai}>
-                  {ai === 'all' ? 'All AIs Combined' : ai}
-                </option>
-              ))}
-            </select>
-          </div>
+      {/* Performance Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <Card className="border-2 border-blue-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Total Trades</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold text-blue-600">{metrics.totalTrades}</p>
+            <p className="text-xs text-gray-500 mt-1">All AI picks analyzed</p>
+          </CardContent>
+        </Card>
 
-          <div>
-            <label className="text-sm text-gray-400 mb-2 block">Timeframe (Days)</label>
-            <select
-              value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
-              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-3 text-white"
-            >
-              <option value="7">Last 7 Days</option>
-              <option value="14">Last 14 Days</option>
-              <option value="30">Last 30 Days</option>
-              <option value="60">Last 60 Days</option>
-              <option value="90">Last 90 Days</option>
-            </select>
-          </div>
+        <Card className="border-2 border-green-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Win Rate</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold text-green-600">{metrics.winRate.toFixed(1)}%</p>
+            <p className="text-xs text-gray-500 mt-1">Profitable trades</p>
+          </CardContent>
+        </Card>
 
-          <div>
-            <label className="text-sm text-gray-400 mb-2 block">Starting Capital ($)</label>
-            <input
-              type="number"
-              value={startingCapital}
-              onChange={(e) => setStartingCapital(parseInt(e.target.value) || 10000)}
-              className="w-full bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-3 text-white"
-              min="1000"
-              step="1000"
-            />
-          </div>
-        </div>
+        <Card className="border-2 border-purple-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Avg Return</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className={`text-3xl font-bold ${metrics.avgReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {metrics.avgReturn >= 0 ? '+' : ''}{metrics.avgReturn.toFixed(2)}%
+            </p>
+            <p className="text-xs text-gray-500 mt-1">Across all trades</p>
+          </CardContent>
+        </Card>
 
-        <button 
-          onClick={runBacktest}
-          disabled={isRunning}
-          className="w-full mt-6 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white font-bold py-4 rounded-lg transition-all text-lg"
-        >
-          {isRunning ? (
-            <span className="flex items-center justify-center gap-2">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-              Running Backtest...
-            </span>
-          ) : (
-            'Run Backtest 🚀'
-          )}
-        </button>
+        <Card className="border-2 border-orange-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Total Profit</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className={`text-3xl font-bold ${metrics.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {metrics.totalProfit >= 0 ? '+' : ''}${metrics.totalProfit.toFixed(2)}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">Net profit/loss</p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Results Display */}
-      {results && !results.error && (
-        <>
-          {/* Summary Stats */}
-          <div className="bg-gradient-to-br from-green-500/20 to-emerald-500/20 rounded-xl p-6 border border-green-500/30 mb-8">
-            <h2 className="text-2xl font-bold mb-4">💰 Backtest Summary</h2>
-            <div className="grid md:grid-cols-3 gap-4">
-              <div>
-                <div className="text-sm text-gray-300">Starting Capital</div>
-                <div className="text-2xl font-bold text-white">${results.startingCapital}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-300">Final Capital</div>
-                <div className="text-2xl font-bold text-green-400">${results.finalCapital}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-300">Total Profit/Loss</div>
-                <div className={`text-2xl font-bold ${parseFloat(results.totalProfit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {parseFloat(results.totalProfit) >= 0 ? '+' : ''}${results.totalProfit} ({parseFloat(results.totalReturn) >= 0 ? '+' : ''}{results.totalReturn}%)
-                </div>
-              </div>
+      {/* Profit Analysis */}
+      <Card className="mb-8 border-2 border-blue-300">
+        <CardHeader>
+          <CardTitle>💰 Profit Analysis</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-2">Entry Value</p>
+              <p className="text-2xl font-bold text-blue-600">${metrics.totalEntryValue.toFixed(2)}</p>
+            </div>
+            <div className="text-center p-4 bg-green-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-2">Current Value</p>
+              <p className="text-2xl font-bold text-green-600">${metrics.totalCurrentValue.toFixed(2)}</p>
+            </div>
+            <div className="text-center p-4 bg-purple-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-2">Target Value</p>
+              <p className="text-2xl font-bold text-purple-600">${metrics.totalTargetValue.toFixed(2)}</p>
+            </div>
+            <div className="text-center p-4 bg-orange-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-2">Avg Days Held</p>
+              <p className="text-2xl font-bold text-orange-600">{metrics.avgDaysHeld.toFixed(0)}</p>
             </div>
           </div>
 
-          {/* Performance Metrics */}
-          <div className="grid md:grid-cols-2 gap-8 mb-8">
-            <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20">
-              <h2 className="text-2xl font-bold mb-6">📊 Performance Metrics</h2>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center p-4 bg-slate-900/50 rounded-lg">
-                  <span className="text-gray-400">Total Trades</span>
-                  <span className="text-2xl font-bold text-white">{results.totalTrades}</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-green-500/20 rounded-lg border border-green-500/30">
-                  <span className="text-gray-300">Wins</span>
-                  <span className="text-2xl font-bold text-green-400">{results.wins}</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-red-500/20 rounded-lg border border-red-500/30">
-                  <span className="text-gray-300">Losses</span>
-                  <span className="text-2xl font-bold text-red-400">{results.losses}</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-purple-500/20 rounded-lg border border-purple-500/30">
-                  <span className="text-gray-300">Win Rate</span>
-                  <span className="text-2xl font-bold text-purple-400">{results.winRate}%</span>
-                </div>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+            <div className="p-4 bg-green-100 rounded-lg border-2 border-green-300">
+              <h4 className="font-semibold text-green-800 mb-2">🏆 Best Trade</h4>
+              {metrics.bestTrade && (
+                <>
+                  <p className="text-xl font-bold">{metrics.bestTrade.ticker}</p>
+                  <p className="text-lg text-green-700 font-semibold">
+                    +{metrics.bestTrade.actual_return.toFixed(2)}%
+                  </p>
+                  <p className="text-sm text-gray-700 mt-1">
+                    ${metrics.bestTrade.entry_price.toFixed(2)} → ${metrics.bestTrade.current_price?.toFixed(2)}
+                  </p>
+                </>
+              )}
             </div>
 
-            <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20">
-              <h2 className="text-2xl font-bold mb-6">💎 Profit Analysis</h2>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center p-4 bg-slate-900/50 rounded-lg">
-                  <span className="text-gray-400">Avg Gain per Trade</span>
-                  <span className={`text-2xl font-bold ${parseFloat(results.avgGain) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {parseFloat(results.avgGain) >= 0 ? '+' : ''}{results.avgGain}%
-                  </span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-green-500/20 rounded-lg border border-green-500/30">
-                  <span className="text-gray-300">Best Trade</span>
-                  <span className="text-2xl font-bold text-green-400">+{results.maxGain}%</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-red-500/20 rounded-lg border border-red-500/30">
-                  <span className="text-gray-300">Worst Trade</span>
-                  <span className="text-2xl font-bold text-red-400">{results.maxLoss}%</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-blue-500/20 rounded-lg border border-blue-500/30">
-                  <span className="text-gray-300">Sharpe Ratio</span>
-                  <span className="text-2xl font-bold text-blue-400">{results.sharpeRatio}</span>
-                </div>
-              </div>
+            <div className="p-4 bg-red-100 rounded-lg border-2 border-red-300">
+              <h4 className="font-semibold text-red-800 mb-2">📉 Worst Trade</h4>
+              {metrics.worstTrade && (
+                <>
+                  <p className="text-xl font-bold">{metrics.worstTrade.ticker}</p>
+                  <p className="text-lg text-red-700 font-semibold">
+                    {metrics.worstTrade.actual_return.toFixed(2)}%
+                  </p>
+                  <p className="text-sm text-gray-700 mt-1">
+                    ${metrics.worstTrade.entry_price.toFixed(2)} → ${metrics.worstTrade.current_price?.toFixed(2)}
+                  </p>
+                </>
+              )}
             </div>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* Recent Trades */}
-          {results.trades && results.trades.length > 0 && (
-            <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20 mb-8">
-              <h2 className="text-2xl font-bold mb-6">📜 Sample Trades (Last 10)</h2>
-              <div className="space-y-3">
-                {results.trades.map((trade: any, idx: number) => (
-                  <div key={idx} className="bg-slate-900/50 rounded-lg p-4 border border-purple-500/20">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <span className="text-xl font-bold text-white">${trade.symbol}</span>
-                        <span className="text-sm text-gray-400 ml-3">{trade.ai}</span>
-                        <span className="text-sm text-gray-500 ml-3">{trade.date}</span>
+      {/* Filters */}
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Filter className="w-5 h-5 text-gray-600" />
+            <h3 className="font-semibold">Filters</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Filter by AI</label>
+              <Select value={aiFilter} onValueChange={setAiFilter}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {aiOptions.map((ai: any) => (
+                    <SelectItem key={ai} value={ai}>
+                      {ai === 'all' ? 'All AIs' : ai}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Status</label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="open">Open Positions</SelectItem>
+                  <SelectItem value="closed">Closed</SelectItem>
+                  <SelectItem value="target_hit">Target Hit</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Performance</label>
+              <Select value={performanceFilter} onValueChange={setPerformanceFilter}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Performance</SelectItem>
+                  <SelectItem value="winners">Winners Only</SelectItem>
+                  <SelectItem value="losers">Losers Only</SelectItem>
+                  <SelectItem value="target_hit">Target Hit</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Results */}
+      <div className="space-y-4">
+        <p className="text-sm text-gray-600">
+          Showing {filteredResults.length} of {results.length} trades
+        </p>
+
+        {filteredResults.map((result) => {
+          const isExpanded = expandedResult === result.id;
+
+          return (
+            <Card 
+              key={result.id}
+              className="hover:shadow-lg transition-all cursor-pointer"
+              onClick={() => toggleExpand(result.id)}
+            >
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                  {/* Ticker & Status */}
+                  <div className="md:col-span-2">
+                    <h3 className="text-2xl font-bold">{result.ticker}</h3>
+                    <Badge className="mt-1">{result.ai_name}</Badge>
+                    <Badge 
+                      className="mt-1 ml-2"
+                      variant={result.status === 'target_hit' ? 'default' : 'secondary'}
+                    >
+                      {result.status}
+                    </Badge>
+                  </div>
+
+                  {/* Entry */}
+                  <div className="md:col-span-2 text-center">
+                    <p className="text-xs text-gray-600 mb-1">Entry Price</p>
+                    <p className="text-lg font-bold text-blue-600">${result.entry_price.toFixed(2)}</p>
+                    <p className="text-xs text-gray-500">
+                      {new Date(result.entry_date).toLocaleDateString()}
+                    </p>
+                  </div>
+
+                  {/* Current */}
+                  <div className="md:col-span-2 text-center">
+                    <p className="text-xs text-gray-600 mb-1">Current Price</p>
+                    <p className="text-lg font-bold">
+                      ${result.current_price?.toFixed(2) || 'N/A'}
+                    </p>
+                    <p className={`text-xs font-semibold ${result.actual_return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {result.actual_return >= 0 ? '+' : ''}{result.actual_return.toFixed(2)}%
+                    </p>
+                  </div>
+
+                  {/* Target */}
+                  <div className="md:col-span-2 text-center">
+                    <p className="text-xs text-gray-600 mb-1">Target Price</p>
+                    <p className="text-lg font-bold text-green-600">${result.target_price.toFixed(2)}</p>
+                    <p className="text-xs text-green-600">
+                      +{result.expected_return.toFixed(2)}% expected
+                    </p>
+                  </div>
+
+                  {/* Performance */}
+                  <div className="md:col-span-2 text-center">
+                    <p className="text-xs text-gray-600 mb-1">Performance</p>
+                    <div className={`flex items-center justify-center gap-1 ${result.actual_return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {result.actual_return >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                      <span className="text-lg font-bold">
+                        {result.actual_return >= 0 ? '+' : ''}{result.actual_return.toFixed(2)}%
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">{result.days_held} days</p>
+                  </div>
+
+                  {/* Expand */}
+                  <div className="md:col-span-2 flex items-center justify-center">
+                    <Button variant="ghost" size="sm">
+                      {isExpanded ? <ChevronUp className="w-6 h-6" /> : <ChevronDown className="w-6 h-6" />}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Expanded Details */}
+                {isExpanded && (
+                  <div className="mt-4 pt-4 border-t space-y-4 bg-gray-50 p-4 rounded-lg">
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="text-center p-3 bg-white rounded">
+                        <p className="text-xs text-gray-600 mb-1">Entry → Current</p>
+                        <p className={`text-lg font-bold ${result.actual_return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {result.actual_return >= 0 ? '+' : ''}{result.actual_return.toFixed(2)}%
+                        </p>
                       </div>
-                      <div className="text-right">
-                        <div className={`text-xl font-bold ${trade.returnPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {trade.returnPercent >= 0 ? '+' : ''}{trade.returnPercent.toFixed(2)}%
-                        </div>
-                        <div className="text-sm text-gray-400">
-                          ${trade.entryPrice.toFixed(2)} → ${trade.exitPrice.toFixed(2)}
-                        </div>
+                      <div className="text-center p-3 bg-white rounded">
+                        <p className="text-xs text-gray-600 mb-1">Entry → Target</p>
+                        <p className="text-lg font-bold text-blue-600">
+                          +{result.expected_return.toFixed(2)}%
+                        </p>
+                      </div>
+                      <div className="text-center p-3 bg-white rounded">
+                        <p className="text-xs text-gray-600 mb-1">Current → Target</p>
+                        <p className="text-lg font-bold text-purple-600">
+                          +{result.current_price && result.target_price 
+                            ? ((result.target_price - result.current_price) / result.current_price * 100).toFixed(2)
+                            : '0.00'
+                          }%
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-blue-50 p-3 rounded border border-blue-200">
+                      <p className="text-xs font-semibold text-blue-900 mb-1">AI Reasoning:</p>
+                      <p className="text-sm text-gray-700 leading-relaxed">{result.reasoning}</p>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-600">Confidence:</p>
+                        <p className="font-semibold">{result.confidence}%</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600">Days Held:</p>
+                        <p className="font-semibold">{result.days_held}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600">Status:</p>
+                        <p className="font-semibold capitalize">{result.status.replace('_', ' ')}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600">AI:</p>
+                        <p className="font-semibold">{result.ai_name}</p>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
 
-          {/* What This Means */}
-          <div className="bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl p-8 border border-blue-500/30">
-            <h2 className="text-2xl font-bold mb-4">💡 What These Numbers Mean</h2>
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <div className="font-bold text-white mb-2">🎯 Win Rate</div>
-                <p className="text-sm text-gray-300">
-                  {results.winRate}% win rate means this strategy was profitable {results.winRate} out of 100 times. 
-                  Anything above 60% is excellent! Most professional traders aim for 55-60%.
-                </p>
-              </div>
-              <div>
-                <div className="font-bold text-white mb-2">📈 Sharpe Ratio</div>
-                <p className="text-sm text-gray-300">
-                  Measures risk-adjusted returns. Above 1.0 is good, above 2.0 is excellent. 
-                  This backtest scored {results.sharpeRatio} - {parseFloat(results.sharpeRatio) >= 2 ? 'crushing it!' : parseFloat(results.sharpeRatio) >= 1 ? 'solid performance!' : 'room for improvement.'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Error Display */}
-      {results && results.error && (
-        <div className="bg-red-500/20 rounded-xl p-8 border border-red-500/30">
-          <h2 className="text-2xl font-bold text-red-400 mb-4">⚠️ No Data Found</h2>
-          <p className="text-gray-300">{results.error}</p>
-          <p className="text-gray-400 mt-4">Try selecting a different AI or longer timeframe.</p>
-        </div>
-      )}
-
-      {/* Instructions if no results yet */}
-      {!results && (
-        <div className="bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl p-8 border border-blue-500/30">
-          <h2 className="text-2xl font-bold mb-4">💡 How Backtesting Works</h2>
-          <div className="grid md:grid-cols-3 gap-6">
-            <div>
-              <div className="text-4xl mb-3">1️⃣</div>
-              <h3 className="font-bold text-white mb-2">Configure Settings</h3>
-              <p className="text-sm text-gray-300">
-                Choose which AI to test, the timeframe, and your starting capital.
-              </p>
-            </div>
-            <div>
-              <div className="text-4xl mb-3">2️⃣</div>
-              <h3 className="font-bold text-white mb-2">Run the Test</h3>
-              <p className="text-sm text-gray-300">
-                We analyze historical picks and simulate what would have happened if you followed that AI.
-              </p>
-            </div>
-            <div>
-              <div className="text-4xl mb-3">3️⃣</div>
-              <h3 className="font-bold text-white mb-2">Review Results</h3>
-              <p className="text-sm text-gray-300">
-                See win rate, total profit, and detailed trade history. Learn what works!
-              </p>
-            </div>
-          </div>
-        </div>
+      {filteredResults.length === 0 && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-gray-600">No results found with current filters</p>
+          </CardContent>
+        </Card>
       )}
     </div>
-  )
+  );
 }
