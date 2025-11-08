@@ -1,13 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  typescript: {
-    // ☢️ NUCLEAR OPTION: Ignore all TypeScript errors during build
-    ignoreBuildErrors: true,
+  swcMinify: true,
+  images: {
+    domains: ['kteobfyferrukqeolofj.supabase.co'],
   },
-  eslint: {
-    // Also ignore ESLint errors during build
-    ignoreDuringBuilds: true,
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   },
 }
 
