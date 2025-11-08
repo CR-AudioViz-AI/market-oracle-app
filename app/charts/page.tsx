@@ -1,134 +1,136 @@
-"use client"
+'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { LineChart, TrendingUp } from 'lucide-react'
+import { getAllStockPicks } from '@/lib/supabase'
+import { getAIColor } from '@/lib/utils'
 
 export default function ChartsPage() {
   const [picks, setPicks] = useState<any[]>([])
-  const [selected, setSelected] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchPicks()
+    loadData()
   }, [])
 
-  async function fetchPicks() {
-    const { data } = await supabase
-      .from('stock_picks')
-      .select('*')
-      .limit(20)
-    if (data) {
+  async function loadData() {
+    try {
+      const data = await getAllStockPicks()
       setPicks(data)
-      setSelected(data[0])
+    } catch (error) {
+      console.error('Error:', error)
+    } finally {
+      setLoading(false)
     }
   }
 
-  const indicators = [
-    { name: 'Moving Average (MA)', icon: '📈', desc: 'Smooths out price trends over time' },
-    { name: 'RSI (Relative Strength)', icon: '💪', desc: 'Shows if stock is overbought/oversold' },
-    { name: 'MACD', icon: '🎯', desc: 'Momentum and trend direction' },
-    { name: 'Bollinger Bands', icon: '📊', desc: 'Volatility and price extremes' },
-    { name: 'Volume', icon: '🔊', desc: 'Trading activity strength' },
-    { name: 'Support/Resistance', icon: '⚖️', desc: 'Key price levels' }
-  ]
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-[400px]"><div className="spinner"></div></div>
+  }
+
+  const aiStats = picks.reduce((acc: any, pick) => {
+    if (!acc[pick.ai_name]) {
+      acc[pick.ai_name] = { total: 0, avgConfidence: 0, picks: [] }
+    }
+    acc[pick.ai_name].total++
+    acc[pick.ai_name].avgConfidence += pick.confidence_score
+    acc[pick.ai_name].picks.push(pick)
+    return acc
+  }, {})
+
+  Object.keys(aiStats).forEach(ai => {
+    aiStats[ai].avgConfidence = aiStats[ai].avgConfidence / aiStats[ai].total
+  })
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
-      <div className="mb-8">
-        <h1 className="text-5xl font-bold bg-gradient-to-r from-green-400 via-emerald-400 to-teal-400 bg-clip-text text-transparent mb-4">
-          📉 Advanced Charts
+    <div className="space-y-8">
+      <div className="text-center mb-12">
+        <h1 className="text-5xl font-bold mb-4 flex items-center justify-center gap-4">
+          <LineChart className="w-12 h-12 text-brand-cyan" />
+          <span className="gradient-text">Charts</span>
         </h1>
-        <p className="text-xl text-gray-300 mb-2">
-          Technical analysis made simple - 20+ indicators at your fingertips
-        </p>
-        <p className="text-gray-400">
-          Read charts like a pro. Spot patterns. Time your entries perfectly 🎯
-        </p>
+        <p className="text-xl text-slate-300">Visualize AI performance and trends</p>
       </div>
 
-      {/* Chart Placeholder */}
-      <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20 mb-8">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h2 className="text-3xl font-bold text-white">${selected?.symbol || 'Loading...'}</h2>
-            <p className="text-gray-400">Click any pick below to see its chart</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-800">
+          <h3 className="text-xl font-bold mb-6">Picks per AI</h3>
+          <div className="space-y-4">
+            {Object.entries(aiStats).map(([aiName, stats]: [string, any]) => {
+              const colors = getAIColor(aiName)
+              const percentage = (stats.total / picks.length * 100).toFixed(1)
+              
+              return (
+                <div key={aiName}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})` }}></div>
+                      <span className="font-semibold">{aiName}</span>
+                    </div>
+                    <span className="text-sm text-slate-400">{stats.total} picks ({percentage}%)</span>
+                  </div>
+                  <div className="w-full bg-slate-700 rounded-full h-3">
+                    <div
+                      className="h-3 rounded-full transition-all"
+                      style={{ 
+                        width: `${percentage}%`,
+                        background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
-          <select className="bg-slate-900 border border-purple-500/30 rounded-lg px-4 py-2 text-white">
-            <option>1 Day</option>
-            <option>1 Week</option>
-            <option>1 Month</option>
-            <option>3 Months</option>
-            <option>1 Year</option>
-          </select>
         </div>
 
-        {/* Simulated Chart Area */}
-        <div className="bg-slate-900/80 rounded-lg p-8 mb-6" style={{ height: '400px' }}>
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="text-6xl mb-4">📊</div>
-              <p className="text-xl text-gray-400">Interactive chart coming soon!</p>
-              <p className="text-sm text-gray-500 mt-2">Will include TradingView integration</p>
-            </div>
+        <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-800">
+          <h3 className="text-xl font-bold mb-6">Average Confidence</h3>
+          <div className="space-y-4">
+            {Object.entries(aiStats)
+              .sort(([, a]: any, [, b]: any) => b.avgConfidence - a.avgConfidence)
+              .map(([aiName, stats]: [string, any]) => {
+                const colors = getAIColor(aiName)
+                
+                return (
+                  <div key={aiName}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})` }}></div>
+                        <span className="font-semibold">{aiName}</span>
+                      </div>
+                      <span className="text-sm text-green-400">{stats.avgConfidence.toFixed(1)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-700 rounded-full h-3">
+                      <div
+                        className="bg-gradient-to-r from-green-500 to-emerald-500 h-3 rounded-full transition-all"
+                        style={{ width: `${stats.avgConfidence}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )
+              })}
           </div>
-        </div>
-
-        {/* Quick Stats */}
-        {selected && (
-          <div className="grid grid-cols-4 gap-4">
-            <div className="bg-slate-900/50 rounded-lg p-4">
-              <div className="text-sm text-gray-400">Current</div>
-              <div className="text-xl font-bold text-white">${selected.entry_price.toFixed(2)}</div>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-4">
-              <div className="text-sm text-gray-400">Target</div>
-              <div className="text-xl font-bold text-green-400">${selected.target_price.toFixed(2)}</div>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-4">
-              <div className="text-sm text-gray-400">Upside</div>
-              <div className="text-xl font-bold text-blue-400">
-                +{(((selected.target_price - selected.entry_price) / selected.entry_price) * 100).toFixed(1)}%
-              </div>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-4">
-              <div className="text-sm text-gray-400">AI Score</div>
-              <div className="text-xl font-bold text-purple-400">{selected.confidence_score}%</div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Technical Indicators */}
-      <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20 mb-8">
-        <h2 className="text-2xl font-bold mb-6">🛠️ Available Indicators</h2>
-        <div className="grid md:grid-cols-3 gap-4">
-          {indicators.map((ind, idx) => (
-            <div key={idx} className="bg-slate-900/50 rounded-lg p-6 hover:bg-slate-900/80 transition-all cursor-pointer border border-purple-500/20">
-              <div className="text-3xl mb-3">{ind.icon}</div>
-              <div className="font-bold text-white mb-2">{ind.name}</div>
-              <div className="text-sm text-gray-400">{ind.desc}</div>
-            </div>
-          ))}
         </div>
       </div>
 
-      {/* Stock Picker */}
-      <div className="bg-slate-800/50 rounded-xl p-8 border border-purple-500/20">
-        <h2 className="text-2xl font-bold mb-6">📋 Select Stock to Analyze</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {picks.map((pick) => (
-            <div
-              key={pick.id}
-              onClick={() => setSelected(pick)}
-              className={`cursor-pointer p-4 rounded-lg transition-all ${
-                selected?.id === pick.id
-                  ? 'bg-purple-500/30 border-2 border-purple-400'
-                  : 'bg-slate-900/50 border-2 border-transparent hover:border-purple-500/30'
-              }`}
-            >
-              <div className="text-xl font-bold text-white mb-1">${pick.symbol}</div>
-              <div className="text-sm text-gray-400">{pick.ai_name}</div>
-            </div>
-          ))}
+      <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-800">
+        <h3 className="text-xl font-bold mb-6">Performance Summary</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="text-center">
+            <p className="text-3xl font-bold text-brand-cyan mb-2">{picks.length}</p>
+            <p className="text-slate-400">Total Picks</p>
+          </div>
+          <div className="text-center">
+            <p className="text-3xl font-bold text-green-400 mb-2">
+              {(picks.reduce((sum, p) => sum + p.confidence_score, 0) / picks.length).toFixed(1)}%
+            </p>
+            <p className="text-slate-400">Avg Confidence</p>
+          </div>
+          <div className="text-center">
+            <p className="text-3xl font-bold text-white mb-2">{Object.keys(aiStats).length}</p>
+            <p className="text-slate-400">Active AIs</p>
+          </div>
         </div>
       </div>
     </div>
