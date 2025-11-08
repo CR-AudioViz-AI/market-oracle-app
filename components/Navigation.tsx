@@ -1,9 +1,10 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
-import { Menu, X, TrendingUp } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 
 const navigationItems = [
   { name: 'Dashboard', href: '/' },
@@ -32,13 +33,15 @@ export function Navigation() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/" className="flex items-center space-x-3 group">
-            {/* Crystal Ball Logo Placeholder */}
-            <div className="relative w-10 h-10">
-              <div className="absolute inset-0 bg-gradient-to-br from-brand-cyan to-brand-navy rounded-full opacity-80 group-hover:opacity-100 transition-opacity">
-                <div className="absolute inset-1 bg-slate-900 rounded-full flex items-center justify-center">
-                  <TrendingUp className="w-5 h-5 text-brand-cyan" />
-                </div>
-              </div>
+            <div className="relative w-12 h-12 transition-transform group-hover:scale-110">
+              <Image
+                src="/market-oracle-logo.png"
+                alt="Market Oracle"
+                width={48}
+                height={48}
+                className="object-contain"
+                priority
+              />
             </div>
             <span className="text-xl font-bold gradient-text hidden sm:block">
               Market Oracle
