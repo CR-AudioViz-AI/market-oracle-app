@@ -1,429 +1,366 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { createClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { TrendingUp, TrendingDown, Target, Sparkles, ChevronDown, ChevronUp, Zap, Award, Swords } from 'lucide-react'
-import { getAllStockPicks, getAIStatistics, getHotPicks, type StockPick } from '@/lib/supabase'
-import { formatCurrency, calculateGainPercentage, formatPercentage, getAIColor, formatTimeAgo } from '@/lib/utils'
-import { AdvancedAnalytics } from '@/components/AdvancedAnalytics'
-import { StockScreener } from '@/components/StockScreener'
-import { AIPerformanceHeatMap } from '@/components/AIPerformanceHeatMap'
-import { AchievementSystem } from '@/components/AchievementSystem'
-import { RealTimePriceTracker } from '@/components/RealTimePriceTracker'
 
-export default function DashboardPage() {
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+interface StockPick {
+  id: string
+  ticker: string
+  ai_name: string
+  price: number
+  current_price: number
+  target_price: number
+  confidence_score: number
+  reasoning: string
+  picked_at: string
+}
+
+export default function Dashboard() {
   const [picks, setPicks] = useState<StockPick[]>([])
   const [filteredPicks, setFilteredPicks] = useState<StockPick[]>([])
-  const [hotPicks, setHotPicks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedAI, setSelectedAI] = useState('All')
+  const [selectedStatus, setSelectedStatus] = useState('All')
   const [showAll, setShowAll] = useState(false)
-  const [stats, setStats] = useState<any[]>([])
-  const [activeTab, setActiveTab] = useState('overview')
-  
-  const [selectedAI, setSelectedAI] = useState<string>('all')
-  const [selectedConfidence, setSelectedConfidence] = useState<string>('all')
-  const [sortBy, setSortBy] = useState<string>('date')
+  const [expandedPick, setExpandedPick] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
-    loadData()
-    const interval = setInterval(loadData, 30000)
+    loadPicks()
+    const interval = setInterval(loadPicks, 30000) // Refresh every 30s
     return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
-    applyFiltersAndSort()
-  }, [picks, selectedAI, selectedConfidence, sortBy])
+    filterPicks()
+  }, [picks, selectedAI, selectedStatus, searchTerm])
 
-  async function loadData() {
-    try {
-      const [picksData, statsData, hotPicksData] = await Promise.all([
-        getAllStockPicks(),
-        getAIStatistics(),
-        getHotPicks()
-      ])
-      setPicks(picksData)
-      setStats(statsData)
-      setHotPicks(hotPicksData)
-    } catch (error) {
-      console.error('Error loading data:', error)
-    } finally {
-      setLoading(false)
+  async function loadPicks() {
+    const { data, error } = await supabase
+      .from('ai_stock_picks')
+      .select('*')
+      .order('picked_at', { ascending: false })
+
+    if (data) {
+      setPicks(data)
     }
+    setLoading(false)
   }
 
-  function applyFiltersAndSort() {
+  function filterPicks() {
     let filtered = [...picks]
 
-    if (selectedAI !== 'all') {
-      filtered = filtered.filter(p => p.ai_name.toLowerCase() === selectedAI)
+    if (selectedAI !== 'All') {
+      filtered = filtered.filter(p => p.ai_name === selectedAI)
     }
 
-    if (selectedConfidence !== 'all') {
-      if (selectedConfidence === 'high') {
-        filtered = filtered.filter(p => p.confidence_score >= 80)
-      } else if (selectedConfidence === 'medium') {
-        filtered = filtered.filter(p => p.confidence_score >= 60 && p.confidence_score < 80)
-      } else if (selectedConfidence === 'low') {
-        filtered = filtered.filter(p => p.confidence_score < 60)
-      }
+    if (selectedStatus === 'Winning') {
+      filtered = filtered.filter(p => p.current_price > p.price)
+    } else if (selectedStatus === 'Losing') {
+      filtered = filtered.filter(p => p.current_price < p.price)
     }
 
-    if (sortBy === 'date') {
-      filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    } else if (sortBy === 'confidence') {
-      filtered.sort((a, b) => b.confidence_score - a.confidence_score)
-    } else if (sortBy === 'gains') {
-      filtered.sort((a, b) => {
-        const gainsA = calculateGainPercentage(a.entry_price, a.target_price)
-        const gainsB = calculateGainPercentage(b.entry_price, b.target_price)
-        return gainsB - gainsA
-      })
-    } else if (sortBy === 'symbol') {
-      filtered.sort((a, b) => a.symbol.localeCompare(b.symbol))
+    if (searchTerm) {
+      filtered = filtered.filter(p => 
+        p.ticker.toLowerCase().includes(searchTerm.toLowerCase())
+      )
     }
 
     setFilteredPicks(filtered)
   }
 
-  const displayedPicks = showAll ? filteredPicks : filteredPicks.slice(0, 12)
-  const totalPicks = picks.length
-  const activeAIs = new Set(picks.map(p => p.ai_name)).size
-  const avgConfidence = picks.length > 0
-    ? picks.reduce((sum, p) => sum + p.confidence_score, 0) / picks.length
+  function calculatePerformance(pick: StockPick) {
+    return ((pick.current_price - pick.price) / pick.price * 100).toFixed(2)
+  }
+
+  function calculateTargetDistance(pick: StockPick) {
+    return ((pick.target_price - pick.current_price) / pick.current_price * 100).toFixed(2)
+  }
+
+  const aiList = ['All', ...Array.from(new Set(picks.map(p => p.ai_name)))]
+  const winningPicks = picks.filter(p => p.current_price > p.price).length
+  const losingPicks = picks.filter(p => p.current_price < p.price).length
+  const avgConfidence = picks.length > 0 
+    ? (picks.reduce((sum, p) => sum + p.confidence_score, 0) / picks.length).toFixed(1)
     : 0
+  const winRate = picks.length > 0 ? (winningPicks / picks.length * 100).toFixed(1) : 0
+
+  const displayPicks = showAll ? filteredPicks : filteredPicks.slice(0, 20)
+
+  // AI Leaderboard
+  const aiStats = aiList.filter(ai => ai !== 'All').map(aiName => {
+    const aiPicks = picks.filter(p => p.ai_name === aiName)
+    const wins = aiPicks.filter(p => p.current_price > p.price).length
+    const totalPicks = aiPicks.length
+    const winRate = totalPicks > 0 ? (wins / totalPicks * 100) : 0
+    const avgConf = totalPicks > 0 
+      ? aiPicks.reduce((sum, p) => sum + p.confidence_score, 0) / totalPicks 
+      : 0
+    return { aiName, totalPicks, wins, winRate, avgConf }
+  }).sort((a, b) => b.winRate - a.winRate)
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="spinner mx-auto mb-4"></div>
-          <p className="text-slate-400">Loading Market Oracle...</p>
-        </div>
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 flex items-center justify-center">
+        <div className="text-white text-2xl">Loading Market Oracle...</div>
       </div>
     )
   }
 
-  const topSymbols = picks.slice(0, 6).map(p => p.symbol)
-
   return (
-    <div className="space-y-8">
-      {/* Hero Section */}
-      <div className="text-center mb-12">
-        <h1 className="text-5xl font-bold mb-4">
-          <span className="gradient-text">Market Oracle</span>
-        </h1>
-        <p className="text-xl text-slate-300 max-w-3xl mx-auto">
-          5 AI models battle to pick the best penny stocks. Watch, learn, and compete with {totalPicks} real predictions.
-        </p>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-5xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-400">
+            🔮 Market Oracle
+          </h1>
+          <p className="text-xl text-gray-300">AI Battle: 5 Models Compete to Pick Winning Stocks</p>
+        </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Link href="/battle">
-          <div className="bg-gradient-to-r from-red-500/20 to-orange-500/20 rounded-xl p-6 border border-red-500/30 hover:border-red-500/50 transition-all cursor-pointer card-hover">
-            <div className="flex items-center gap-4">
-              <Swords className="w-12 h-12 text-red-400" />
-              <div>
-                <h3 className="text-xl font-bold">AI Battle Royale</h3>
-                <p className="text-sm text-slate-400">See which AI is winning</p>
-              </div>
-            </div>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 p-6 rounded-lg border border-blue-500/30">
+            <div className="text-3xl font-bold">{picks.length}</div>
+            <div className="text-gray-300">Total Picks</div>
           </div>
-        </Link>
-
-        <Link href="/hot-picks">
-          <div className="bg-gradient-to-r from-orange-500/20 to-yellow-500/20 rounded-xl p-6 border border-orange-500/30 hover:border-orange-500/50 transition-all cursor-pointer card-hover">
-            <div className="flex items-center gap-4">
-              <Target className="w-12 h-12 text-orange-400" />
-              <div>
-                <h3 className="text-xl font-bold">Hot Picks</h3>
-                <p className="text-sm text-slate-400">{hotPicks.length} consensus picks</p>
-              </div>
-            </div>
+          <div className="bg-gradient-to-br from-green-500/20 to-green-600/20 p-6 rounded-lg border border-green-500/30">
+            <div className="text-3xl font-bold text-green-400">{winningPicks}</div>
+            <div className="text-gray-300">Winning ({winRate}%)</div>
           </div>
-        </Link>
-
-        <Link href="/paper-trading">
-          <div className="bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-xl p-6 border border-green-500/30 hover:border-green-500/50 transition-all cursor-pointer card-hover">
-            <div className="flex items-center gap-4">
-              <Zap className="w-12 h-12 text-green-400" />
-              <div>
-                <h3 className="text-xl font-bold">Paper Trading</h3>
-                <p className="text-sm text-slate-400">Practice with $10,000</p>
-              </div>
-            </div>
+          <div className="bg-gradient-to-br from-red-500/20 to-red-600/20 p-6 rounded-lg border border-red-500/30">
+            <div className="text-3xl font-bold text-red-400">{losingPicks}</div>
+            <div className="text-gray-300">Losing</div>
           </div>
-        </Link>
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="bg-slate-900/50 rounded-xl p-2 border border-slate-800 flex gap-2 overflow-x-auto">
-        {[
-          { id: 'overview', name: 'Overview', icon: TrendingUp },
-          { id: 'analytics', name: 'Analytics', icon: Sparkles },
-          { id: 'screener', name: 'Screener', icon: Target },
-          { id: 'heatmap', name: 'Heat Map', icon: Award },
-          { id: 'achievements', name: 'Achievements', icon: Trophy }
-        ].map(tab => {
-          const Icon = tab.icon
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${
-                activeTab === tab.id
-                  ? 'bg-gradient-to-r from-brand-cyan to-blue-500 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {tab.name}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Tab Content */}
-      {activeTab === 'overview' && (
-        <>
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-brand-cyan/30">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-slate-400 text-sm mb-1">Total AI Picks</p>
-                  <p className="text-4xl font-bold text-brand-cyan">{totalPicks}</p>
-                </div>
-                <Target className="w-12 h-12 text-brand-cyan opacity-50" />
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-brand-navy/50">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-slate-400 text-sm mb-1">Active AIs</p>
-                  <p className="text-4xl font-bold text-white">{activeAIs}</p>
-                </div>
-                <Sparkles className="w-12 h-12 text-brand-navy opacity-50" />
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-green-500/30">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-slate-400 text-sm mb-1">Avg Confidence</p>
-                  <p className="text-4xl font-bold text-green-400">{avgConfidence.toFixed(1)}%</p>
-                </div>
-                <TrendingUp className="w-12 h-12 text-green-400 opacity-50" />
-              </div>
-            </div>
+          <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 p-6 rounded-lg border border-purple-500/30">
+            <div className="text-3xl font-bold text-purple-400">{avgConfidence}%</div>
+            <div className="text-gray-300">Avg Confidence</div>
           </div>
+        </div>
 
-          {/* Real-Time Price Tracker */}
-          <RealTimePriceTracker symbols={topSymbols} />
-
-          {/* AI Leaderboard */}
-          <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-800">
-            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-              <Sparkles className="w-6 h-6 text-brand-cyan" />
-              AI Leaderboard
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              {stats.map((ai) => {
-                const colors = getAIColor(ai.aiName)
-                return (
-                  <div
-                    key={ai.aiName}
-                    className="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-slate-600 transition-all card-hover"
-                  >
-                    <div className="flex items-center gap-3 mb-3">
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})` }}
-                      ></div>
-                      <span className="font-semibold">{ai.aiName}</span>
-                    </div>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Picks:</span>
-                        <span className="font-semibold">{ai.totalPicks}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Confidence:</span>
-                        <span className="font-semibold text-green-400">{ai.avgConfidence.toFixed(1)}%</span>
-                      </div>
-                    </div>
+        {/* AI Leaderboard */}
+        <div className="bg-white/5 rounded-lg p-6 mb-8 border border-white/10">
+          <h2 className="text-2xl font-bold mb-4">🏆 AI Leaderboard</h2>
+          <div className="grid gap-3">
+            {aiStats.map((ai, idx) => (
+              <div key={ai.aiName} className="bg-white/5 p-4 rounded-lg flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <span className="text-2xl">
+                    {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : ''}
+                  </span>
+                  <div>
+                    <div className="font-bold">{ai.aiName}</div>
+                    <div className="text-sm text-gray-400">{ai.totalPicks} picks</div>
                   </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xl font-bold text-green-400">{ai.winRate.toFixed(1)}%</div>
+                  <div className="text-sm text-gray-400">Win Rate</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white/5 rounded-lg p-6 mb-8 border border-white/10">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm mb-2">Filter by AI</label>
+              <select 
+                value={selectedAI}
+                onChange={(e) => setSelectedAI(e.target.value)}
+                className="w-full bg-white/10 border border-white/20 rounded-lg p-2"
+              >
+                {aiList.map(ai => (
+                  <option key={ai} value={ai}>{ai}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm mb-2">Filter by Status</label>
+              <select 
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                className="w-full bg-white/10 border border-white/20 rounded-lg p-2"
+              >
+                <option value="All">All</option>
+                <option value="Winning">Winning</option>
+                <option value="Losing">Losing</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm mb-2">Search Ticker</label>
+              <input 
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="e.g. AAPL"
+                className="w-full bg-white/10 border border-white/20 rounded-lg p-2"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={() => setShowAll(!showAll)}
+                className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg"
+              >
+                {showAll ? 'Show Less' : `Show All ${filteredPicks.length}`}
+              </button>
+            </div>
+          </div>
+          <div className="mt-4 text-sm text-gray-400">
+            Showing {displayPicks.length} of {filteredPicks.length} picks
+          </div>
+        </div>
+
+        {/* Stock Picks Table */}
+        <div className="bg-white/5 rounded-lg p-6 mb-8 border border-white/10">
+          <h2 className="text-2xl font-bold mb-4">📊 All AI Stock Picks</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-white/20">
+                  <th className="text-left p-3">Ticker</th>
+                  <th className="text-left p-3">AI</th>
+                  <th className="text-right p-3">Entry</th>
+                  <th className="text-right p-3">Current</th>
+                  <th className="text-right p-3">Target</th>
+                  <th className="text-right p-3">Performance</th>
+                  <th className="text-right p-3">Confidence</th>
+                  <th className="text-center p-3">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayPicks.map(pick => {
+                  const perf = parseFloat(calculatePerformance(pick))
+                  const isExpanded = expandedPick === pick.id
+                  
+                  return (
+                    <tr key={pick.id} className="border-b border-white/10 hover:bg-white/5">
+                      <td className="p-3">
+                        <div className="font-bold text-lg">{pick.ticker}</div>
+                      </td>
+                      <td className="p-3">
+                        <span className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded text-sm">
+                          {pick.ai_name}
+                        </span>
+                      </td>
+                      <td className="text-right p-3 font-mono">${pick.price.toFixed(2)}</td>
+                      <td className="text-right p-3 font-mono">${pick.current_price.toFixed(2)}</td>
+                      <td className="text-right p-3 font-mono">${pick.target_price.toFixed(2)}</td>
+                      <td className={`text-right p-3 font-bold ${perf >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {perf >= 0 ? '+' : ''}{perf}%
+                      </td>
+                      <td className="text-right p-3">{pick.confidence_score}%</td>
+                      <td className="text-center p-3">
+                        <button
+                          onClick={() => setExpandedPick(isExpanded ? null : pick.id)}
+                          className="text-cyan-400 hover:text-cyan-300"
+                        >
+                          {isExpanded ? '▲ Hide' : '▼ Details'}
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr key={`${pick.id}-details`} className="bg-white/10">
+                        <td colSpan={8} className="p-6">
+                          <div className="grid md:grid-cols-2 gap-6">
+                            <div>
+                              <h4 className="font-bold text-lg mb-3">📋 AI Reasoning</h4>
+                              <p className="text-gray-300 leading-relaxed">{pick.reasoning}</p>
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-lg mb-3">📊 Pick Details</h4>
+                              <div className="space-y-2">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Entry Price:</span>
+                                  <span className="font-mono">${pick.price.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Current Price:</span>
+                                  <span className="font-mono">${pick.current_price.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Target Price:</span>
+                                  <span className="font-mono">${pick.target_price.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Distance to Target:</span>
+                                  <span className="font-mono">{calculateTargetDistance(pick)}%</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Confidence:</span>
+                                  <span>{pick.confidence_score}%</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Picked:</span>
+                                  <span>{new Date(pick.picked_at).toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tr>
                 )
               })}
-            </div>
+              </tbody>
+            </table>
           </div>
+        </div>
 
-          {/* Filters & Sort */}
-          <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-800">
-            <div className="flex flex-wrap gap-4 items-center">
-              <div>
-                <label className="text-sm text-slate-400 block mb-2">Filter by AI</label>
-                <select
-                  value={selectedAI}
-                  onChange={(e) => setSelectedAI(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
-                >
-                  <option value="all">All AIs</option>
-                  {stats.map(ai => (
-                    <option key={ai.aiName} value={ai.aiName.toLowerCase()}>{ai.aiName}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm text-slate-400 block mb-2">Filter by Confidence</label>
-                <select
-                  value={selectedConfidence}
-                  onChange={(e) => setSelectedConfidence(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
-                >
-                  <option value="all">All Levels</option>
-                  <option value="high">High (80%+)</option>
-                  <option value="medium">Medium (60-79%)</option>
-                  <option value="low">Low (&lt;60%)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm text-slate-400 block mb-2">Sort by</label>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
-                >
-                  <option value="date">Newest First</option>
-                  <option value="confidence">Highest Confidence</option>
-                  <option value="gains">Highest Potential Gains</option>
-                  <option value="symbol">Symbol (A-Z)</option>
-                </select>
-              </div>
-
-              <div className="ml-auto">
-                <p className="text-sm text-slate-400">
-                  Showing {displayedPicks.length} of {filteredPicks.length} picks
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Stock Picks Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {displayedPicks.map((pick) => {
-              const potentialGain = calculateGainPercentage(pick.entry_price, pick.target_price)
-              const colors = getAIColor(pick.ai_name)
-              
-              return (
-                <div
-                  key={pick.id}
-                  className="bg-slate-900/50 rounded-xl p-6 border border-slate-800 hover:border-slate-700 transition-all card-hover"
-                >
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-2xl font-bold text-white">{pick.symbol}</h3>
-                      <p className="text-xs text-slate-400">{formatTimeAgo(pick.created_at)}</p>
-                    </div>
-                    <div
-                      className="px-3 py-1 rounded-full text-xs font-semibold"
-                      style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})` }}
-                    >
-                      {pick.ai_name}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <p className="text-xs text-slate-400 mb-1">Entry Price</p>
-                      <p className="text-lg font-semibold">{formatCurrency(pick.entry_price)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-400 mb-1">Target Price</p>
-                      <p className="text-lg font-semibold text-green-400">{formatCurrency(pick.target_price)}</p>
-                    </div>
-                  </div>
-
-                  <div className="mb-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs text-slate-400">Potential Gain</span>
-                      <span className={`text-sm font-bold ${potentialGain >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {formatPercentage(potentialGain)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs text-slate-400">Confidence</span>
-                      <span className="text-sm font-semibold">{pick.confidence_score}%</span>
-                    </div>
-                    <div className="w-full bg-slate-800 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full transition-all ${
-                          pick.confidence_score >= 80 ? 'bg-gradient-to-r from-green-500 to-emerald-500' :
-                          pick.confidence_score >= 60 ? 'bg-gradient-to-r from-yellow-500 to-orange-500' :
-                          'bg-gradient-to-r from-red-500 to-pink-500'
-                        }`}
-                        style={{ width: `${pick.confidence_score}%` }}
-                      ></div>
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-slate-400 bg-slate-800/30 rounded-lg p-3 mb-4 line-clamp-2">
-                    {pick.reasoning}
-                  </div>
-
-                  <button className="w-full bg-gradient-to-r from-brand-cyan to-blue-500 hover:from-brand-cyan/80 hover:to-blue-500/80 text-white font-bold py-3 rounded-lg transition-all">
-                    Add to Watchlist ⭐
-                  </button>
+        {/* Performance Chart */}
+        <div className="bg-white/5 rounded-lg p-6 mb-8 border border-white/10">
+          <h2 className="text-2xl font-bold mb-4">📈 Performance Overview</h2>
+          <div className="h-64 flex items-end justify-around gap-4">
+            {aiStats.map(ai => (
+              <div key={ai.aiName} className="flex-1 flex flex-col items-center">
+                <div 
+                  className="w-full bg-gradient-to-t from-cyan-500 to-blue-500 rounded-t-lg transition-all"
+                  style={{ height: `${ai.winRate}%` }}
+                />
+                <div className="text-xs mt-2 text-center">
+                  <div className="font-bold">{ai.aiName}</div>
+                  <div className="text-gray-400">{ai.winRate.toFixed(0)}%</div>
                 </div>
-              )
-            })}
+              </div>
+            ))}
           </div>
+        </div>
 
-          {/* Show All / Show Less Toggle */}
-          {filteredPicks.length > 12 && (
-            <div className="text-center">
-              {!showAll ? (
-                <button
-                  onClick={() => setShowAll(true)}
-                  className="px-8 py-4 bg-gradient-to-r from-brand-cyan to-blue-500 hover:from-brand-cyan/80 hover:to-blue-500/80 text-white font-bold rounded-xl transition-all text-lg inline-flex items-center gap-2"
-                >
-                  Show All {filteredPicks.length} Picks
-                  <ChevronDown className="w-5 h-5" />
-                </button>
-              ) : (
-                <button
-                  onClick={() => { setShowAll(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
-                  className="px-8 py-4 bg-slate-800 hover:bg-slate-700 border border-brand-cyan/30 text-brand-cyan font-bold rounded-xl transition-all inline-flex items-center gap-2"
-                >
-                  Show Less
-                  <ChevronUp className="w-5 h-5" />
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Bottom CTA */}
-          <div className="mt-12 bg-gradient-to-r from-brand-cyan/10 via-brand-red/10 to-brand-navy/10 rounded-xl p-8 border border-brand-cyan/30 text-center">
-            <h2 className="text-3xl font-bold mb-4">Ready to Start Trading?</h2>
-            <p className="text-slate-300 mb-6">Practice with $10,000 virtual money. Zero risk. Real experience.</p>
-            <Link href="/paper-trading">
-              <button className="px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-bold rounded-xl text-lg transition-all">
-                Start Paper Trading 💰
-              </button>
-            </Link>
+        {/* What This Means */}
+        <div className="bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-lg p-6 border border-purple-500/30">
+          <h2 className="text-2xl font-bold mb-4">💡 What This Means</h2>
+          <div className="space-y-4 text-gray-300">
+            <p>
+              <strong className="text-white">Market Oracle</strong> is an AI battle platform where 5 different AI models compete to pick winning stocks. 
+              Each AI analyzes the market independently and picks stocks they believe will increase in value.
+            </p>
+            <p>
+              <strong className="text-white">Performance</strong> shows how well each stock is doing. Green means the current price is higher than when the AI picked it (winning). 
+              Red means it's lower (losing). The percentage tells you exactly how much it's gained or lost.
+            </p>
+            <p>
+              <strong className="text-white">Entry/Current/Target</strong> are three key prices: Entry is what the stock cost when picked, Current is what it costs now, 
+              and Target is where the AI thinks it will go. If Current reaches Target, that's a successful prediction!
+            </p>
+            <p>
+              <strong className="text-white">Confidence Score</strong> (0-100%) shows how sure the AI is about this pick. Higher confidence means the AI strongly believes in this stock.
+            </p>
+            <p>
+              Click <strong className="text-white">"▼ Details"</strong> on any pick to see the full AI reasoning - why that AI chose this specific stock. 
+              This helps you learn how AI thinks about stock picking.
+            </p>
           </div>
-        </>
-      )}
-
-      {activeTab === 'analytics' && <AdvancedAnalytics />}
-      {activeTab === 'screener' && <StockScreener />}
-      {activeTab === 'heatmap' && <AIPerformanceHeatMap />}
-      {activeTab === 'achievements' && <AchievementSystem />}
+        </div>
+      </div>
     </div>
   )
 }
-
-import { Trophy } from 'lucide-react'
