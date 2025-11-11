@@ -32,20 +32,17 @@ export function Navigation() {
     <nav className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800 shadow-lg">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          <Link href="/" className="flex items-center space-x-3 group">
-            <div className="relative w-12 h-12 transition-transform group-hover:scale-110">
+          <Link href="/" className="flex items-center group">
+            <div className="relative w-14 h-14 transition-transform group-hover:scale-105">
               <Image
-                src="/market-oracle-logo.png"
+                src="https://raw.githubusercontent.com/CR-AudioViz-AI/crav-website/main/public/marketoracle.png"
                 alt="Market Oracle"
-                width={48}
-                height={48}
+                width={56}
+                height={56}
                 className="object-contain"
                 priority
               />
             </div>
-            <span className="text-xl font-bold gradient-text hidden sm:block">
-              Market Oracle
-            </span>
           </Link>
 
           <div className="hidden lg:flex items-center space-x-1">
@@ -80,12 +77,12 @@ export function Navigation() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
                   className={`block px-3 py-2 rounded-md text-base font-medium ${
                     pathname === item.href
-                      ? 'bg-gradient-to-r from-brand-cyan/20 to-brand-navy/20 text-brand-cyan border-l-4 border-brand-cyan'
+                      ? 'bg-gradient-to-r from-brand-cyan/20 to-brand-navy/20 text-brand-cyan border border-brand-cyan/30'
                       : 'text-slate-300 hover:text-white hover:bg-slate-800'
                   }`}
-                  onClick={() => setMobileMenuOpen(false)}
                 >
                   {item.name}
                 </Link>
