@@ -200,24 +200,34 @@ export default function DashboardPage() {
 
         {/* Quick Navigation */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
-          {[
-            { name: 'Portfolio', href: '/portfolio', icon: '💼', color: 'blue' },
-            { name: 'Backtesting', href: '/backtesting', icon: '📊', color: 'green' },
-            { name: 'Voting', href: '/voting', icon: '🗳️', color: 'purple' },
-            { name: 'Paper Trade', href: '/paper-trading', icon: '📝', color: 'yellow' },
-            { name: 'Watchlist', href: '/watchlist', icon: '⭐', color: 'pink' },
-            { name: 'Community', href: '/community', icon: '💬', color: 'indigo' },
-            { name: 'Alerts', href: '/alerts', icon: '🔔', color: 'red' },
-          ].map(item => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`bg-gradient-to-br from-${item.color}-500/20 to-${item.color}-600/20 hover:from-${item.color}-500/30 hover:to-${item.color}-600/30 border border-${item.color}-400/30 rounded-xl p-4 text-center transition`}
-            >
-              <div className="text-3xl mb-2">{item.icon}</div>
-              <div className="font-semibold text-sm">{item.name}</div>
-            </Link>
-          ))}
+          <Link href="/portfolio" className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 hover:from-blue-500/30 hover:to-blue-600/30 border border-blue-400/30 rounded-xl p-4 text-center transition">
+            <div className="text-3xl mb-2">💼</div>
+            <div className="font-semibold text-sm">Portfolio</div>
+          </Link>
+          <Link href="/backtesting" className="bg-gradient-to-br from-green-500/20 to-green-600/20 hover:from-green-500/30 hover:to-green-600/30 border border-green-400/30 rounded-xl p-4 text-center transition">
+            <div className="text-3xl mb-2">📊</div>
+            <div className="font-semibold text-sm">Backtesting</div>
+          </Link>
+          <Link href="/voting" className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 hover:from-purple-500/30 hover:to-purple-600/30 border border-purple-400/30 rounded-xl p-4 text-center transition">
+            <div className="text-3xl mb-2">🗳️</div>
+            <div className="font-semibold text-sm">Voting</div>
+          </Link>
+          <Link href="/paper-trading" className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 hover:from-yellow-500/30 hover:to-yellow-600/30 border border-yellow-400/30 rounded-xl p-4 text-center transition">
+            <div className="text-3xl mb-2">📝</div>
+            <div className="font-semibold text-sm">Paper Trade</div>
+          </Link>
+          <Link href="/watchlist" className="bg-gradient-to-br from-pink-500/20 to-pink-600/20 hover:from-pink-500/30 hover:to-pink-600/30 border border-pink-400/30 rounded-xl p-4 text-center transition">
+            <div className="text-3xl mb-2">⭐</div>
+            <div className="font-semibold text-sm">Watchlist</div>
+          </Link>
+          <Link href="/community" className="bg-gradient-to-br from-indigo-500/20 to-indigo-600/20 hover:from-indigo-500/30 hover:to-indigo-600/30 border border-indigo-400/30 rounded-xl p-4 text-center transition">
+            <div className="text-3xl mb-2">💬</div>
+            <div className="font-semibold text-sm">Community</div>
+          </Link>
+          <Link href="/alerts" className="bg-gradient-to-br from-red-500/20 to-red-600/20 hover:from-red-500/30 hover:to-red-600/30 border border-red-400/30 rounded-xl p-4 text-center transition">
+            <div className="text-3xl mb-2">🔔</div>
+            <div className="font-semibold text-sm">Alerts</div>
+          </Link>
         </div>
 
         {/* AI Pick Groups */}
