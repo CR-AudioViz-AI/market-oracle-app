@@ -86,7 +86,7 @@ export default function DashboardPage() {
 
     try {
       // Remove duplicates
-      const uniqueSymbols = [...new Set(symbols)]
+      const uniqueSymbols = Array.from(new Set(symbols))
       
       const response = await fetch(`/api/stock-price?symbols=${uniqueSymbols.join(',')}`)
       
@@ -337,3 +337,4 @@ export default function DashboardPage() {
     </div>
   )
 }
+
