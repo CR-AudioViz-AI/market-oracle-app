@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
 }
 
 // Helper function to get historical price for a specific date
-export async function getHistoricalPrice(symbol: string, date: string): Promise<number | null> {
+async function getHistoricalPrice(symbol: string, date: string): Promise<number | null> {
   try {
     // Convert date to Unix timestamp
     const targetDate = new Date(date)
@@ -124,3 +124,4 @@ export async function getHistoricalPrice(symbol: string, date: string): Promise<
     return null
   }
 }
+
