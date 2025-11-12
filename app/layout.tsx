@@ -29,7 +29,7 @@ export default function RootLayout({
               Powered by <span className="text-brand-cyan font-semibold">CR AudioViz AI</span>
             </p>
             <p className="text-xs">
-              "Your Story. Our Design" | EIN: 93-4520864
+              "Your Story. Our Design"
             </p>
           </div>
         </footer>
@@ -37,3 +37,4 @@ export default function RootLayout({
     </html>
   )
 }
+
