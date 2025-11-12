@@ -134,7 +134,11 @@ export default function InsightsPage() {
     }
   }
 
+  // Get unique AI names from picks
   const aiList = ['All', ...Array.from(new Set(picks.map(p => p.ai_name)))]
+  
+  // Get unique stocks (group by symbol)
+  const uniqueStocks = Array.from(new Set(picks.map(p => p.symbol))).sort()
 
   if (loading) {
     return (
@@ -199,17 +203,21 @@ export default function InsightsPage() {
               <label className="block text-sm mb-2 text-slate-400">Select Stock</label>
               <select 
                 onChange={(e) => {
-                  const pick = picks.find(p => p.id === e.target.value)
+                  const symbol = e.target.value
+                  // Find first pick for this symbol
+                  const pick = picks.find(p => p.symbol === symbol)
                   setSelectedPick(pick || null)
                 }}
-                value={selectedPick?.id || ''}
+                value={selectedPick?.symbol || ''}
                 className="w-full bg-white/10 border border-white/20 rounded-lg p-3 text-white"
               >
-                {picks.map(pick => {
-                  const currentPrice = prices[pick.symbol]?.price || pick.entry_price
+                {uniqueStocks.map(symbol => {
+                  const pickCount = picks.filter(p => p.symbol === symbol).length
+                  const firstPick = picks.find(p => p.symbol === symbol)!
+                  const currentPrice = prices[symbol]?.price || firstPick.entry_price
                   return (
-                    <option key={pick.id} value={pick.id}>
-                      {pick.symbol} - {pick.ai_name} - ${currentPrice.toFixed(2)}
+                    <option key={symbol} value={symbol}>
+                      {symbol} - {pickCount} AI{pickCount > 1 ? 's' : ''} - ${currentPrice.toFixed(2)}
                     </option>
                   )
                 })}
