@@ -9,12 +9,18 @@ interface YahooQuoteResponse {
       meta: {
         regularMarketPrice: number
         previousClose: number
+        regularMarketDayHigh?: number
+        regularMarketDayLow?: number
+        regularMarketVolume?: number
         symbol: string
       }
       timestamp: number[]
       indicators: {
         quote: Array<{
           close: number[]
+          high?: number[]
+          low?: number[]
+          volume?: number[]
         }>
       }
     }>
@@ -54,15 +60,25 @@ export async function GET(request: NextRequest) {
         
         if (data.chart?.result?.[0]?.meta) {
           const meta = data.chart.result[0].meta
+          const quote = data.chart.result[0].indicators?.quote?.[0]
+          
           const currentPrice = meta.regularMarketPrice
           const previousClose = meta.previousClose
           const change = currentPrice - previousClose
           const changePercent = (change / previousClose) * 100
 
+          // Get high/low/volume from meta (current day) or from quote array (last value)
+          const high = meta.regularMarketDayHigh || (quote?.high ? quote.high[quote.high.length - 1] : null)
+          const low = meta.regularMarketDayLow || (quote?.low ? quote.low[quote.low.length - 1] : null)
+          const volume = meta.regularMarketVolume || (quote?.volume ? quote.volume[quote.volume.length - 1] : null)
+
           priceData[symbol] = {
             price: currentPrice,
             change: change,
-            changePercent: changePercent
+            changePercent: changePercent,
+            high: high || currentPrice,
+            low: low || currentPrice,
+            volume: volume || 0
           }
         }
       } catch (error) {
