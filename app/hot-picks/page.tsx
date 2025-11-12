@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import Link from 'next/link'
+import { ArrowLeft, TrendingUp, Flame, Brain } from 'lucide-react'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,22 +12,23 @@ const supabase = createClient(
 
 interface StockPick {
   id: string
-  ticker: string
+  symbol: string
   ai_name: string
-  price: number
-  current_price: number
+  entry_price: number
   target_price: number
   confidence_score: number
   reasoning: string
-  picked_at: string
+  pick_date: string
+  status: string
+  sector?: string
+  catalyst?: string
 }
 
 interface ConsensusPick {
-  ticker: string
+  symbol: string
   aiCount: number
   picks: StockPick[]
   avgEntry: number
-  avgCurrent: number
   avgTarget: number
   avgConfidence: number
   consensusPercent: number
@@ -35,7 +38,7 @@ export default function HotPicksPage() {
   const [picks, setPicks] = useState<StockPick[]>([])
   const [consensusPicks, setConsensusPicks] = useState<ConsensusPick[]>([])
   const [loading, setLoading] = useState(true)
-  const [expandedTicker, setExpandedTicker] = useState<string | null>(null)
+  const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null)
 
   useEffect(() => {
     loadPicks()
@@ -43,230 +46,235 @@ export default function HotPicksPage() {
 
   async function loadPicks() {
     const { data } = await supabase
-      .from('ai_stock_picks')
+      .from('stock_picks')
       .select('*')
-      .order('picked_at', { ascending: false })
+      .eq('status', 'OPEN')
+      .order('pick_date', { ascending: false })
 
     if (data) {
-      setPicks(data)
-      calculateConsensus(data)
+      setPicks(data as StockPick[])
+      calculateConsensus(data as StockPick[])
     }
     setLoading(false)
   }
 
   function calculateConsensus(allPicks: StockPick[]) {
+    // Group by symbol
     const grouped = allPicks.reduce((acc, pick) => {
-      if (!acc[pick.ticker]) {
-        acc[pick.ticker] = []
+      if (!acc[pick.symbol]) {
+        acc[pick.symbol] = []
       }
-      acc[pick.ticker].push(pick)
+      acc[pick.symbol].push(pick)
       return acc
     }, {} as Record<string, StockPick[]>)
 
+    // Calculate consensus for stocks picked by 2+ AIs
     const consensus = Object.entries(grouped)
       .filter(([_, picks]) => picks.length >= 2)
-      .map(([ticker, picks]) => ({
-        ticker,
+      .map(([symbol, picks]) => ({
+        symbol,
         aiCount: picks.length,
         picks: picks.sort((a, b) => b.confidence_score - a.confidence_score),
-        avgEntry: picks.reduce((sum, p) => sum + p.price, 0) / picks.length,
-        avgCurrent: picks.reduce((sum, p) => sum + p.current_price, 0) / picks.length,
+        avgEntry: picks.reduce((sum, p) => sum + p.entry_price, 0) / picks.length,
         avgTarget: picks.reduce((sum, p) => sum + p.target_price, 0) / picks.length,
         avgConfidence: picks.reduce((sum, p) => sum + p.confidence_score, 0) / picks.length,
-        consensusPercent: (picks.length / 5) * 100
+        consensusPercent: (picks.length / 5) * 100 // 5 AIs total
       }))
       .sort((a, b) => b.aiCount - a.aiCount)
 
     setConsensusPicks(consensus)
   }
 
-  function calculatePerformance(entry: number, current: number) {
-    return ((current - entry) / entry * 100).toFixed(2)
-  }
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 flex items-center justify-center">
-        <div className="text-white text-2xl">Loading Hot Picks...</div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-white text-3xl font-bold mb-4">Loading Hot Picks...</div>
+          <div className="text-slate-400">Finding AI consensus...</div>
+        </div>
       </div>
     )
   }
 
+  // Count consensus levels
+  const allAIsAgree = consensusPicks.filter(p => p.aiCount === 5).length
+  const fourAIsAgree = consensusPicks.filter(p => p.aiCount === 4).length
+  const threeAIsAgree = consensusPicks.filter(p => p.aiCount === 3).length
+  const twoAIsAgree = consensusPicks.filter(p => p.aiCount === 2).length
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 text-white p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 text-brand-cyan hover:text-brand-cyan/80 transition mb-6"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          Back to Dashboard
+        </Link>
+
         <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">🔥 Hot Picks</h1>
-          <p className="text-gray-300">Stocks with AI consensus - multiple AIs agree these are winners</p>
+          <h1 className="text-5xl font-bold mb-3 flex items-center gap-3">
+            <Flame className="w-12 h-12 text-orange-500" />
+            Hot Picks
+          </h1>
+          <p className="text-xl text-slate-300">
+            Stocks with AI consensus - multiple AIs agree these are winners
+          </p>
         </div>
 
-        {/* Stats */}
-        <div className="grid md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-gradient-to-br from-red-500/20 to-orange-500/20 p-6 rounded-lg border border-red-500/30">
-            <div className="text-3xl font-bold">{consensusPicks.filter(p => p.aiCount === 5).length}</div>
-            <div className="text-gray-300">🔥 All 5 AIs Agree</div>
+        {/* Consensus Summary */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-gradient-to-br from-orange-500/20 to-red-500/20 backdrop-blur-sm rounded-xl p-6 border border-orange-500/30">
+            <div className="text-4xl font-bold mb-2">{allAIsAgree}</div>
+            <div className="text-sm text-slate-300">🔥 All 5 AIs Agree</div>
           </div>
-          <div className="bg-gradient-to-br from-orange-500/20 to-yellow-500/20 p-6 rounded-lg border border-orange-500/30">
-            <div className="text-3xl font-bold">{consensusPicks.filter(p => p.aiCount === 4).length}</div>
-            <div className="text-gray-300">⭐ 4 AIs Agree</div>
+          <div className="bg-gradient-to-br from-yellow-500/20 to-orange-500/20 backdrop-blur-sm rounded-xl p-6 border border-yellow-500/30">
+            <div className="text-4xl font-bold mb-2">{fourAIsAgree}</div>
+            <div className="text-sm text-slate-300">⭐ 4 AIs Agree</div>
           </div>
-          <div className="bg-gradient-to-br from-yellow-500/20 to-green-500/20 p-6 rounded-lg border border-yellow-500/30">
-            <div className="text-3xl font-bold">{consensusPicks.filter(p => p.aiCount === 3).length}</div>
-            <div className="text-gray-300">✓ 3 AIs Agree</div>
+          <div className="bg-gradient-to-br from-blue-500/20 to-cyan-500/20 backdrop-blur-sm rounded-xl p-6 border border-blue-500/30">
+            <div className="text-4xl font-bold mb-2">{threeAIsAgree}</div>
+            <div className="text-sm text-slate-300">✓ 3 AIs Agree</div>
           </div>
-          <div className="bg-gradient-to-br from-green-500/20 to-blue-500/20 p-6 rounded-lg border border-green-500/30">
-            <div className="text-3xl font-bold">{consensusPicks.filter(p => p.aiCount === 2).length}</div>
-            <div className="text-gray-300">~ 2 AIs Agree</div>
+          <div className="bg-gradient-to-br from-purple-500/20 to-blue-500/20 backdrop-blur-sm rounded-xl p-6 border border-purple-500/30">
+            <div className="text-4xl font-bold mb-2">{twoAIsAgree}</div>
+            <div className="text-sm text-slate-300">~ 2 AIs Agree</div>
           </div>
         </div>
 
-        {/* Consensus Chart */}
-        <div className="bg-white/5 rounded-lg p-6 mb-8 border border-white/10">
-          <h2 className="text-2xl font-bold mb-4">📊 Consensus Strength</h2>
-          <div className="h-64 flex items-end justify-around gap-4">
-            {[5, 4, 3, 2].map(count => {
-              const picksCount = consensusPicks.filter(p => p.aiCount === count).length
-              const maxCount = Math.max(...[5, 4, 3, 2].map(c => consensusPicks.filter(p => p.aiCount === c).length))
-              const height = maxCount > 0 ? (picksCount / maxCount * 100) : 0
-              
-              return (
-                <div key={count} className="flex-1 flex flex-col items-center">
-                  <div 
-                    className="w-full bg-gradient-to-t from-red-500 to-orange-500 rounded-t-lg transition-all"
-                    style={{ height: `${height}%` }}
-                  />
-                  <div className="text-center mt-2">
-                    <div className="font-bold text-2xl">{picksCount}</div>
-                    <div className="text-xs text-gray-400">{count} AIs</div>
-                  </div>
+        {/* Consensus Strength Chart */}
+        <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 mb-8 border border-white/10">
+          <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+            <Brain className="w-6 h-6 text-brand-cyan" />
+            Consensus Strength
+          </h2>
+          <div className="grid md:grid-cols-4 gap-6">
+            {[
+              { count: 5, label: '5 AIs', stocks: allAIsAgree },
+              { count: 4, label: '4 AIs', stocks: fourAIsAgree },
+              { count: 3, label: '3 AIs', stocks: threeAIsAgree },
+              { count: 2, label: '2 AIs', stocks: twoAIsAgree }
+            ].map(level => (
+              <div key={level.count} className="text-center">
+                <div className="text-6xl font-bold text-brand-cyan mb-2">
+                  {level.stocks}
                 </div>
-              )
-            })}
+                <div className="text-slate-400">{level.label}</div>
+              </div>
+            ))}
           </div>
         </div>
 
         {/* Consensus Picks */}
-        <div className="space-y-6">
-          {consensusPicks.map(consensus => {
-            const perf = parseFloat(calculatePerformance(consensus.avgEntry, consensus.avgCurrent))
-            const isExpanded = expandedTicker === consensus.ticker
-            
-            return (
-              <div key={consensus.ticker} className="bg-white/5 rounded-lg border border-white/10">
-                <div className="p-6">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-3xl font-bold">{consensus.ticker}</h3>
-                        <span className={`px-3 py-1 rounded-full text-sm font-bold ${
-                          consensus.aiCount === 5 ? 'bg-red-500 text-white' :
-                          consensus.aiCount === 4 ? 'bg-orange-500 text-white' :
-                          consensus.aiCount === 3 ? 'bg-yellow-500 text-black' :
-                          'bg-green-500 text-white'
-                        }`}>
-                          {consensus.aiCount}/5 AIs Agree ({consensus.consensusPercent}%)
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-400">
-                        {consensus.picks.map(p => p.ai_name).join(', ')}
-                      </div>
+        {consensusPicks.length === 0 ? (
+          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-12 border border-white/10 text-center">
+            <Flame className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+            <h3 className="text-2xl font-bold mb-2">No Consensus Picks Yet</h3>
+            <p className="text-slate-400">
+              Hot Picks appear when 2 or more AIs select the same stock. Check back soon!
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {consensusPicks.map(consensus => (
+              <div
+                key={consensus.symbol}
+                className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-brand-cyan/30 transition"
+              >
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-4 mb-2">
+                      <Link
+                        href={`/stock/${consensus.symbol}`}
+                        className="text-3xl font-bold hover:text-brand-cyan transition"
+                      >
+                        {consensus.symbol}
+                      </Link>
+                      <span className={`px-4 py-2 rounded-full font-semibold text-sm ${
+                        consensus.aiCount === 5 ? 'bg-orange-500/20 text-orange-400' :
+                        consensus.aiCount === 4 ? 'bg-yellow-500/20 text-yellow-400' :
+                        consensus.aiCount === 3 ? 'bg-blue-500/20 text-blue-400' :
+                        'bg-purple-500/20 text-purple-400'
+                      }`}>
+                        {consensus.aiCount} AIs ({consensus.consensusPercent.toFixed(0)}% consensus)
+                      </span>
                     </div>
-                    <div className={`text-3xl font-bold ${perf >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {perf >= 0 ? '+' : ''}{perf}%
-                    </div>
-                  </div>
-
-                  {/* Price Table */}
-                  <div className="grid md:grid-cols-4 gap-4 mb-4">
-                    <div>
-                      <div className="text-sm text-gray-400">Avg Entry</div>
-                      <div className="text-2xl font-mono">${consensus.avgEntry.toFixed(2)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-400">Avg Current</div>
-                      <div className="text-2xl font-mono">${consensus.avgCurrent.toFixed(2)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-400">Avg Target</div>
-                      <div className="text-2xl font-mono">${consensus.avgTarget.toFixed(2)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-400">Avg Confidence</div>
-                      <div className="text-2xl">{consensus.avgConfidence.toFixed(0)}%</div>
+                    <div className="text-slate-400 text-sm">
+                      Picked by: {consensus.picks.map(p => p.ai_name).join(', ')}
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => setExpandedTicker(isExpanded ? null : consensus.ticker)}
-                    className="text-cyan-400 hover:text-cyan-300 text-sm"
-                  >
-                    {isExpanded ? '▲ Hide AI Details' : '▼ Show All AI Reasoning'}
-                  </button>
+                  <div className="flex gap-4">
+                    <div className="text-center">
+                      <div className="text-slate-400 text-sm mb-1">Avg Entry</div>
+                      <div className="text-xl font-bold">${consensus.avgEntry.toFixed(2)}</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-slate-400 text-sm mb-1">Avg Target</div>
+                      <div className="text-xl font-bold text-brand-cyan">${consensus.avgTarget.toFixed(2)}</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-slate-400 text-sm mb-1">Avg Confidence</div>
+                      <div className="text-xl font-bold text-green-400">{consensus.avgConfidence.toFixed(0)}%</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-slate-400 text-sm mb-1">Upside</div>
+                      <div className="text-xl font-bold text-green-400">
+                        +{(((consensus.avgTarget - consensus.avgEntry) / consensus.avgEntry) * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                {isExpanded && (
-                  <div className="border-t border-white/10 p-6 bg-white/5">
-                    <h4 className="font-bold text-lg mb-4">Individual AI Picks:</h4>
-                    <div className="space-y-4">
+                {/* Individual AI Picks */}
+                <div className="mt-4">
+                  <button
+                    onClick={() => setExpandedSymbol(expandedSymbol === consensus.symbol ? null : consensus.symbol)}
+                    className="text-brand-cyan hover:text-brand-cyan/80 transition text-sm font-semibold mb-3"
+                  >
+                    {expandedSymbol === consensus.symbol ? '▼' : '▶'} View Individual AI Picks ({consensus.aiCount})
+                  </button>
+
+                  {expandedSymbol === consensus.symbol && (
+                    <div className="grid md:grid-cols-2 gap-4">
                       {consensus.picks.map(pick => (
-                        <div key={pick.id} className="bg-white/5 rounded-lg p-4">
-                          <div className="flex justify-between items-start mb-3">
+                        <div key={pick.id} className="bg-white/5 rounded-lg p-4 border border-white/10">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="font-semibold">{pick.ai_name}</span>
+                            <span className="text-sm text-slate-400">{pick.confidence_score}% confidence</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 mb-3 text-sm">
                             <div>
-                              <div className="font-bold text-lg">{pick.ai_name}</div>
-                              <div className="text-sm text-gray-400">{pick.confidence_score}% confident</div>
+                              <div className="text-slate-400 text-xs">Entry</div>
+                              <div className="font-semibold">${pick.entry_price.toFixed(2)}</div>
                             </div>
-                            <div className="text-right">
-                              <div className="text-sm text-gray-400">Entry → Current → Target</div>
-                              <div className="font-mono">
-                                ${pick.price.toFixed(2)} → ${pick.current_price.toFixed(2)} → ${pick.target_price.toFixed(2)}
+                            <div>
+                              <div className="text-slate-400 text-xs">Target</div>
+                              <div className="font-semibold">${pick.target_price.toFixed(2)}</div>
+                            </div>
+                            <div>
+                              <div className="text-slate-400 text-xs">Upside</div>
+                              <div className="font-semibold text-green-400">
+                                +{(((pick.target_price - pick.entry_price) / pick.entry_price) * 100).toFixed(1)}%
                               </div>
                             </div>
                           </div>
-                          <div className="text-gray-300 text-sm leading-relaxed">
-                            {pick.reasoning}
-                          </div>
+                          {pick.catalyst && (
+                            <div className="text-xs text-slate-400 mt-2">
+                              <span className="font-semibold">Catalyst:</span> {pick.catalyst}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            )
-          })}
-        </div>
-
-        {consensusPicks.length === 0 && (
-          <div className="bg-white/5 rounded-lg p-12 text-center border border-white/10">
-            <div className="text-4xl mb-4">🔍</div>
-            <h3 className="text-2xl font-bold mb-2">No Consensus Picks Yet</h3>
-            <p className="text-gray-400">
-              Consensus picks appear when 2 or more AIs choose the same stock. Check back later!
-            </p>
+            ))}
           </div>
         )}
-
-        {/* What This Means */}
-        <div className="mt-8 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-lg p-6 border border-purple-500/30">
-          <h2 className="text-2xl font-bold mb-4">💡 What This Means</h2>
-          <div className="space-y-3 text-gray-300">
-            <p>
-              <strong className="text-white">Consensus = Multiple AIs Agree.</strong> When 2 or more completely independent AI models pick the same stock, that's a powerful signal. They each analyzed the market differently but reached the same conclusion.
-            </p>
-            <p>
-              <strong className="text-white">5/5 AIs = Strongest Consensus.</strong> If ALL 5 AIs picked the same stock, that's extremely rare and significant. These are the hottest picks with maximum AI confidence.
-            </p>
-            <p>
-              <strong className="text-white">Average Prices</strong> show the consensus entry, current, and target. If 3 AIs picked at different times, we show the average to give you the overall consensus view.
-            </p>
-            <p>
-              <strong className="text-white">Individual AI Reasoning</strong> (click Show Details) lets you see why each AI chose this stock. Compare their logic to understand different perspectives.
-            </p>
-            <p>
-              Hot Picks have higher probability of success because multiple independent analyses confirmed the same opportunity. But remember: even strong consensus isn't guaranteed!
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   )
