@@ -83,7 +83,7 @@ export default function InsightsPage() {
     if (symbols.length === 0) return
 
     try {
-      const uniqueSymbols = [...new Set(symbols)]
+      const uniqueSymbols = Array.from(new Set(symbols))
       const response = await fetch(`/api/stock-price?symbols=${uniqueSymbols.join(',')}`)
       
       if (!response.ok) return
