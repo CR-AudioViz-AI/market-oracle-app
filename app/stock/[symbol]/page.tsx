@@ -160,12 +160,14 @@ export default function StockDetailPage() {
                 {activePicks.length} Active Pick{activePicks.length !== 1 ? 's' : ''} • {closedPicks.length} Closed
               </p>
               
-              {currentPrice && (
+              {currentPrice && currentPrice.price != null && (
                 <div className="flex items-baseline gap-4 mb-2">
                   <span className="text-4xl font-bold">${currentPrice.price.toFixed(2)}</span>
-                  <span className={`text-2xl font-semibold ${currentPrice.changePercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {currentPrice.changePercent >= 0 ? '+' : ''}{currentPrice.changePercent.toFixed(2)}%
-                  </span>
+                  {currentPrice.changePercent != null && (
+                    <span className={`text-2xl font-semibold ${currentPrice.changePercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {currentPrice.changePercent >= 0 ? '+' : ''}{currentPrice.changePercent.toFixed(2)}%
+                    </span>
+                  )}
                 </div>
               )}
               
@@ -205,21 +207,21 @@ export default function StockDetailPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
               <div className="text-slate-400 text-sm mb-1">Current Price</div>
-              <div className="text-2xl font-bold">${currentPrice.price.toFixed(2)}</div>
+              <div className="text-2xl font-bold">${currentPrice.price?.toFixed(2) || 'N/A'}</div>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
               <div className="text-slate-400 text-sm mb-1">Day Change</div>
-              <div className={`text-2xl font-bold ${currentPrice.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                ${Math.abs(currentPrice.change).toFixed(2)}
+              <div className={`text-2xl font-bold ${(currentPrice.change || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {currentPrice.change != null ? `$${Math.abs(currentPrice.change).toFixed(2)}` : 'N/A'}
               </div>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
               <div className="text-slate-400 text-sm mb-1">Day High</div>
-              <div className="text-2xl font-bold">${currentPrice.high.toFixed(2)}</div>
+              <div className="text-2xl font-bold">${currentPrice.high?.toFixed(2) || 'N/A'}</div>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
               <div className="text-slate-400 text-sm mb-1">Day Low</div>
-              <div className="text-2xl font-bold">${currentPrice.low.toFixed(2)}</div>
+              <div className="text-2xl font-bold">${currentPrice.low?.toFixed(2) || 'N/A'}</div>
             </div>
           </div>
         )}
