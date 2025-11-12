@@ -182,7 +182,7 @@ export default function DashboardPage() {
               {topPerformer ? topPerformer.symbol : 'N/A'}
             </div>
             <div className="text-sm text-green-400">
-              {topPerformer ? `+${topPerformer.gain.toFixed(1)}%` : '--'}
+              {topPerformer ? `+${topPerformer.gain.toFixed(1)}% (+$${(topPerformer.currentPrice - topPerformer.entry_price).toFixed(2)})` : '--'}
             </div>
           </div>
           
@@ -276,7 +276,7 @@ export default function DashboardPage() {
                             ${currentPrice.toFixed(2)}
                           </div>
                           <div className={`text-xs ${isWinning ? 'text-green-300' : 'text-red-300'}`}>
-                            {isWinning ? '+' : ''}{gain.toFixed(1)}%
+                            {isWinning ? '+' : ''}{gain.toFixed(1)}% (${isWinning ? '+' : ''}{(currentPrice - pick.entry_price).toFixed(2)})
                           </div>
                         </div>
                         <div>
