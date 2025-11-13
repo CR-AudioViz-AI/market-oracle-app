@@ -29,7 +29,7 @@ export default function SectorsPage() {
             ← Back to Dashboard
           </Link>
           <h1 className="text-4xl font-bold text-white mb-2">Sector Analysis</h1>
-          <p className="text-gray-300">Industry breakdown of AI picks and performance</p>
+          <p className="text-gray-300">Industry breakdown of AI picks and performance (All Time)</p>
         </div>
 
         {/* Charts */}
@@ -120,3 +120,4 @@ export default function SectorsPage() {
     </div>
   )
 }
+
