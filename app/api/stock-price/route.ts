@@ -37,7 +37,15 @@ export async function GET(request: NextRequest) {
     }
 
     const symbols = symbolsParam.split(',').map(s => s.trim().toUpperCase())
-    const priceData: Record<string, { price: number, change: number, changePercent: number }> = {}
+    // FIX: Added high, low, volume to type definition
+    const priceData: Record<string, { 
+      price: number
+      change: number
+      changePercent: number
+      high: number
+      low: number
+      volume: number
+    }> = {}
 
     // Fetch prices in batches (Yahoo Finance allows multiple symbols)
     for (const symbol of symbols) {
