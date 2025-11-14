@@ -3,156 +3,193 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-interface PaperTrade {
+interface PaperPosition {
   id: string
   symbol: string
-  action: 'BUY' | 'SELL'
   shares: number
-  entry_price: number
-  current_price: number
-  timestamp: string
-  pnl: number
-  pnl_percent: number
+  entryPrice: number
+  currentPrice: number
+  entryDate: string
 }
 
-interface PortfolioMetrics {
-  totalValue: number
-  cashBalance: number
-  investedValue: number
-  totalPnL: number
-  totalPnLPercent: number
-  dayChange: number
-  dayChangePercent: number
+interface Trade {
+  id: string
+  symbol: string
+  type: 'BUY' | 'SELL'
+  shares: number
+  price: number
+  total: number
+  date: string
 }
 
 export default function PaperTradingPage() {
-  const [trades, setTrades] = useState<PaperTrade[]>([])
-  const [metrics, setMetrics] = useState<PortfolioMetrics>({
-    totalValue: 100000,
-    cashBalance: 75000,
-    investedValue: 25000,
-    totalPnL: 2500,
-    totalPnLPercent: 2.5,
-    dayChange: 450,
-    dayChangePercent: 0.45
+  const [balance, setBalance] = useState(100000) // Starting $100k
+  const [positions, setPositions] = useState<PaperPosition[]>([])
+  const [trades, setTrades] = useState<Trade[]>([])
+  const [showTradeModal, setShowTradeModal] = useState(false)
+  const [tradeType, setTradeType] = useState<'BUY' | 'SELL'>('BUY')
+  const [tradeData, setTradeData] = useState({
+    symbol: '',
+    shares: 0,
+    price: 0
   })
-  const [selectedStock, setSelectedStock] = useState('')
-  const [shares, setShares] = useState(1)
-  const [loading, setLoading] = useState(false)
-  const [expandedTrade, setExpandedTrade] = useState<string | null>(null)
-
-  const [availableStocks, setAvailableStocks] = useState<string[]>([])
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>([])
 
   useEffect(() => {
-    loadPaperTrades()
-    loadAvailableStocks()
+    loadPaperAccount()
+    loadAvailableSymbols()
   }, [])
 
-  async function loadAvailableStocks() {
-    const { data } = await supabase
+  async function loadAvailableSymbols() {
+    const { data: picks } = await supabase
       .from('stock_picks')
       .select('symbol')
       .eq('status', 'OPEN')
-      .limit(20)
 
-    if (data) {
-      const symbols = Array.from(new Set(data.map(d => d.symbol)))
-      setAvailableStocks(symbols)
+    if (picks) {
+      const symbols = [...new Set(picks.map(p => p.symbol))]
+      setAvailableSymbols(symbols)
     }
   }
 
-  async function loadPaperTrades() {
-    // Simulated paper trades for demo
-    const demoTrades: PaperTrade[] = [
-      {
-        id: '1',
-        symbol: 'NVDA',
-        action: 'BUY',
-        shares: 10,
-        entry_price: 450.25,
-        current_price: 465.80,
-        timestamp: '2025-11-06T10:30:00',
-        pnl: 155.50,
-        pnl_percent: 3.45
-      },
-      {
-        id: '2',
-        symbol: 'TSLA',
-        action: 'BUY',
-        shares: 15,
-        entry_price: 235.60,
-        current_price: 241.30,
-        timestamp: '2025-11-05T14:20:00',
-        pnl: 85.50,
-        pnl_percent: 2.42
-      },
-      {
-        id: '3',
-        symbol: 'AMD',
-        action: 'BUY',
-        shares: 20,
-        entry_price: 185.40,
-        current_price: 179.20,
-        timestamp: '2025-11-04T09:15:00',
-        pnl: -124.00,
-        pnl_percent: -3.34
+  function loadPaperAccount() {
+    // Load from localStorage if exists
+    const savedBalance = localStorage.getItem('paper_balance')
+    const savedPositions = localStorage.getItem('paper_positions')
+    const savedTrades = localStorage.getItem('paper_trades')
+
+    if (savedBalance) setBalance(parseFloat(savedBalance))
+    if (savedPositions) setPositions(JSON.parse(savedPositions))
+    if (savedTrades) setTrades(JSON.parse(savedTrades))
+  }
+
+  function savePaperAccount() {
+    localStorage.setItem('paper_balance', balance.toString())
+    localStorage.setItem('paper_positions', JSON.stringify(positions))
+    localStorage.setItem('paper_trades', JSON.stringify(trades))
+  }
+
+  function executeTrade() {
+    const { symbol, shares, price } = tradeData
+    
+    if (!symbol || shares <= 0 || price <= 0) {
+      alert('Please fill all fields correctly')
+      return
+    }
+
+    const total = shares * price
+
+    if (tradeType === 'BUY') {
+      if (total > balance) {
+        alert('Insufficient funds!')
+        return
       }
-    ]
 
-    setTrades(demoTrades)
-  }
+      // Check if position exists
+      const existingPosition = positions.find(p => p.symbol === symbol.toUpperCase())
+      
+      if (existingPosition) {
+        // Add to existing position
+        const newShares = existingPosition.shares + shares
+        const newAvgPrice = ((existingPosition.entryPrice * existingPosition.shares) + total) / newShares
+        
+        setPositions(positions.map(p =>
+          p.symbol === symbol.toUpperCase()
+            ? { ...p, shares: newShares, entryPrice: newAvgPrice }
+            : p
+        ))
+      } else {
+        // Create new position
+        const newPosition: PaperPosition = {
+          id: Date.now().toString(),
+          symbol: symbol.toUpperCase(),
+          shares,
+          entryPrice: price,
+          currentPrice: price,
+          entryDate: new Date().toISOString()
+        }
+        setPositions([...positions, newPosition])
+      }
 
-  async function executeTrade(action: 'BUY' | 'SELL') {
-    if (!selectedStock || shares <= 0) return
+      setBalance(balance - total)
+    } else {
+      // SELL
+      const position = positions.find(p => p.symbol === symbol.toUpperCase())
+      
+      if (!position) {
+        alert('You don\'t own this stock!')
+        return
+      }
 
-    setLoading(true)
+      if (shares > position.shares) {
+        alert(`You only own ${position.shares} shares!`)
+        return
+      }
 
-    // Get current price from Supabase
-    const { data } = await supabase
-      .from('stock_picks')
-      .select('entry_price')
-      .eq('symbol', selectedStock)
-      .single()
+      // Update or remove position
+      if (shares === position.shares) {
+        setPositions(positions.filter(p => p.symbol !== symbol.toUpperCase()))
+      } else {
+        setPositions(positions.map(p =>
+          p.symbol === symbol.toUpperCase()
+            ? { ...p, shares: p.shares - shares }
+            : p
+        ))
+      }
 
-    const price = data?.entry_price || 100
-
-    const newTrade: PaperTrade = {
-      id: Date.now().toString(),
-      symbol: selectedStock,
-      action,
-      shares,
-      entry_price: price,
-      current_price: price,
-      timestamp: new Date().toISOString(),
-      pnl: 0,
-      pnl_percent: 0
+      setBalance(balance + total)
     }
 
-    setTrades(prev => [newTrade, ...prev])
-    setSelectedStock('')
-    setShares(1)
-    setLoading(false)
+    // Record trade
+    const newTrade: Trade = {
+      id: Date.now().toString(),
+      symbol: symbol.toUpperCase(),
+      type: tradeType,
+      shares,
+      price,
+      total,
+      date: new Date().toISOString()
+    }
+    setTrades([newTrade, ...trades])
+
+    // Reset and close
+    setTradeData({ symbol: '', shares: 0, price: 0 })
+    setShowTradeModal(false)
+
+    // Save to localStorage
+    setTimeout(savePaperAccount, 100)
   }
 
-  function closeTrade(tradeId: string) {
-    setTrades(prev => prev.filter(t => t.id !== tradeId))
+  function resetAccount() {
+    if (confirm('Reset your paper trading account? This will erase all positions and trades.')) {
+      setBalance(100000)
+      setPositions([])
+      setTrades([])
+      localStorage.removeItem('paper_balance')
+      localStorage.removeItem('paper_positions')
+      localStorage.removeItem('paper_trades')
+    }
   }
 
-  const portfolioHistory = [
-    { date: 'Nov 1', value: 100000 },
-    { date: 'Nov 2', value: 100500 },
-    { date: 'Nov 3', value: 99800 },
-    { date: 'Nov 4', value: 101200 },
-    { date: 'Nov 5', value: 101800 },
-    { date: 'Nov 6', value: 102500 },
-  ]
+  function calculatePortfolioValue() {
+    const positionsValue = positions.reduce((sum, p) => sum + (p.currentPrice * p.shares), 0)
+    return balance + positionsValue
+  }
+
+  function calculateTotalGainLoss() {
+    const totalValue = calculatePortfolioValue()
+    return totalValue - 100000
+  }
+
+  const totalValue = calculatePortfolioValue()
+  const totalGainLoss = calculateTotalGainLoss()
+  const totalGainLossPercent = (totalGainLoss / 100000) * 100
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 p-8">
@@ -162,214 +199,268 @@ export default function PaperTradingPage() {
           <Link href="/" className="text-blue-400 hover:text-blue-300 mb-4 inline-block">
             ← Back to Dashboard
           </Link>
-          <h1 className="text-4xl font-bold text-white mb-2">Paper Trading</h1>
-          <p className="text-gray-300">Practice trading with virtual money - zero risk, real learning</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-white mb-2">Paper Trading</h1>
+              <p className="text-gray-300">Practice trading with virtual money - $100,000 starting balance</p>
+            </div>
+            <button
+              onClick={resetAccount}
+              className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 font-semibold rounded-lg transition text-sm"
+            >
+              Reset Account
+            </button>
+          </div>
         </div>
 
-        {/* Portfolio Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="text-gray-300 text-sm mb-1">Total Value</div>
-            <div className="text-3xl font-bold text-white">${metrics.totalValue.toLocaleString()}</div>
-          </div>
+        {/* Account Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
             <div className="text-gray-300 text-sm mb-1">Cash Balance</div>
-            <div className="text-3xl font-bold text-white">${metrics.cashBalance.toLocaleString()}</div>
+            <div className="text-3xl font-bold text-white">${balance.toFixed(2)}</div>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="text-gray-300 text-sm mb-1">Invested</div>
-            <div className="text-3xl font-bold text-white">${metrics.investedValue.toLocaleString()}</div>
+            <div className="text-gray-300 text-sm mb-1">Total Value</div>
+            <div className="text-3xl font-bold text-white">${totalValue.toFixed(2)}</div>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="text-gray-300 text-sm mb-1">Total P&L</div>
-            <div className={`text-3xl font-bold ${metrics.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {metrics.totalPnL >= 0 ? '+' : ''}${metrics.totalPnL.toLocaleString()}
-            </div>
-            <div className={`text-sm ${metrics.totalPnLPercent >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-              {metrics.totalPnLPercent >= 0 ? '+' : ''}{metrics.totalPnLPercent}%
+            <div className="text-gray-300 text-sm mb-1">Gain/Loss</div>
+            <div className={`text-3xl font-bold ${totalGainLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {totalGainLoss >= 0 ? '+' : ''}${totalGainLoss.toFixed(2)}
             </div>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="text-gray-300 text-sm mb-1">Today's Change</div>
-            <div className={`text-3xl font-bold ${metrics.dayChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {metrics.dayChange >= 0 ? '+' : ''}${metrics.dayChange}
-            </div>
-            <div className={`text-sm ${metrics.dayChangePercent >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-              {metrics.dayChangePercent >= 0 ? '+' : ''}{metrics.dayChangePercent}%
+            <div className="text-gray-300 text-sm mb-1">Return</div>
+            <div className={`text-3xl font-bold ${totalGainLossPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {totalGainLossPercent >= 0 ? '+' : ''}{totalGainLossPercent.toFixed(2)}%
             </div>
           </div>
         </div>
 
-        {/* Portfolio Chart */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 mb-8">
-          <h3 className="text-xl font-bold text-white mb-4">Portfolio Performance</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={portfolioHistory}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
-              <XAxis dataKey="date" stroke="#ffffff80" />
-              <YAxis stroke="#ffffff80" />
-              <Tooltip
-                contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
-                labelStyle={{ color: '#fff' }}
-              />
-              <Line type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
+        {/* Action Buttons */}
+        <div className="flex gap-4 mb-8">
+          <button
+            onClick={() => {
+              setTradeType('BUY')
+              setShowTradeModal(true)
+            }}
+            className="flex-1 px-6 py-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl transition text-lg"
+          >
+            🟢 BUY Stock
+          </button>
+          <button
+            onClick={() => {
+              setTradeType('SELL')
+              setShowTradeModal(true)
+            }}
+            className="flex-1 px-6 py-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition text-lg"
+          >
+            🔴 SELL Stock
+          </button>
         </div>
 
-        {/* Trading Interface */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 mb-8">
-          <h2 className="text-2xl font-bold text-white mb-6">Execute Trade</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <select
-              value={selectedStock}
-              onChange={(e) => setSelectedStock(e.target.value)}
-              className="bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white"
-            >
-              <option value="">Select Stock</option>
-              {availableStocks.map(symbol => (
-                <option key={symbol} value={symbol}>{symbol}</option>
-              ))}
-            </select>
-            <input
-              type="number"
-              value={shares}
-              onChange={(e) => setShares(parseInt(e.target.value) || 1)}
-              min="1"
-              placeholder="Shares"
-              className="bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white"
-            />
-            <button
-              onClick={() => executeTrade('BUY')}
-              disabled={loading || !selectedStock}
-              className="bg-green-500/20 text-green-300 hover:bg-green-500/30 disabled:bg-gray-500/20 disabled:text-gray-500 rounded-lg px-6 py-3 font-semibold transition"
-            >
-              {loading ? 'Processing...' : 'BUY'}
-            </button>
-            <button
-              onClick={() => executeTrade('SELL')}
-              disabled={loading || !selectedStock}
-              className="bg-red-500/20 text-red-300 hover:bg-red-500/30 disabled:bg-gray-500/20 disabled:text-gray-500 rounded-lg px-6 py-3 font-semibold transition"
-            >
-              {loading ? 'Processing...' : 'SELL'}
-            </button>
-          </div>
-        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          {/* Positions */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+            <h2 className="text-2xl font-bold text-white mb-4">Your Positions</h2>
+            
+            {positions.length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                No positions yet. Click BUY to start trading!
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {positions.map(position => {
+                  const value = position.currentPrice * position.shares
+                  const cost = position.entryPrice * position.shares
+                  const gainLoss = value - cost
+                  const gainLossPercent = (gainLoss / cost) * 100
 
-        {/* Active Trades */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 mb-8">
-          <h2 className="text-2xl font-bold text-white mb-6">Active Positions</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-white/20">
-                  <th className="text-left py-3 px-4 text-gray-300 font-semibold">Symbol</th>
-                  <th className="text-center py-3 px-4 text-gray-300 font-semibold">Action</th>
-                  <th className="text-center py-3 px-4 text-gray-300 font-semibold">Shares</th>
-                  <th className="text-right py-3 px-4 text-gray-300 font-semibold">Entry Price</th>
-                  <th className="text-right py-3 px-4 text-gray-300 font-semibold">Current Price</th>
-                  <th className="text-right py-3 px-4 text-gray-300 font-semibold">P&L</th>
-                  <th className="text-center py-3 px-4 text-gray-300 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trades.map((trade) => {
-                  const isExpanded = expandedTrade === trade.id
                   return (
-                    <>
-                      <tr
-                        key={trade.id}
-                        className="border-b border-white/10 hover:bg-white/5 cursor-pointer transition"
-                        onClick={() => setExpandedTrade(isExpanded ? null : trade.id)}
-                      >
-                        <td className="py-4 px-4 text-white font-bold">{trade.symbol}</td>
-                        <td className="py-4 px-4 text-center">
-                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                            trade.action === 'BUY' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
-                          }`}>
-                            {trade.action}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-center text-white">{trade.shares}</td>
-                        <td className="py-4 px-4 text-right text-white">${trade.entry_price.toFixed(2)}</td>
-                        <td className="py-4 px-4 text-right text-white">${trade.current_price.toFixed(2)}</td>
-                        <td className={`py-4 px-4 text-right font-semibold ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
-                          <div className="text-sm">({trade.pnl_percent >= 0 ? '+' : ''}{trade.pnl_percent.toFixed(2)}%)</div>
-                        </td>
-                        <td className="py-4 px-4 text-center">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              closeTrade(trade.id)
-                            }}
-                            className="px-4 py-1 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition text-sm"
-                          >
-                            Close
-                          </button>
-                        </td>
-                      </tr>
-                      {isExpanded && (
-                        <tr className="bg-white/5">
-                          <td colSpan={7} className="p-6">
-                            <div className="grid grid-cols-4 gap-4">
-                              <div>
-                                <div className="text-gray-400 text-sm">Trade Time</div>
-                                <div className="text-white font-semibold">
-                                  {new Date(trade.timestamp).toLocaleString()}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-gray-400 text-sm">Total Cost</div>
-                                <div className="text-white font-semibold">
-                                  ${(trade.entry_price * trade.shares).toFixed(2)}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-gray-400 text-sm">Current Value</div>
-                                <div className="text-white font-semibold">
-                                  ${(trade.current_price * trade.shares).toFixed(2)}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-gray-400 text-sm">Return %</div>
-                                <div className={`font-semibold ${trade.pnl_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                  {trade.pnl_percent >= 0 ? '+' : ''}{trade.pnl_percent.toFixed(2)}%
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </>
+                    <div key={position.id} className="bg-white/5 rounded-lg p-4 border border-white/10">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-xl font-bold text-white">{position.symbol}</div>
+                        <div className="text-sm text-gray-400">{position.shares} shares</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <div className="text-gray-400">Avg Price</div>
+                          <div className="text-white font-semibold">${position.entryPrice.toFixed(2)}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400">Current</div>
+                          <div className="text-white font-semibold">${position.currentPrice.toFixed(2)}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400">Value</div>
+                          <div className="text-white font-semibold">${value.toFixed(2)}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400">Gain/Loss</div>
+                          <div className={`font-semibold ${gainLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {gainLoss >= 0 ? '+' : ''}${gainLoss.toFixed(2)} ({gainLossPercent.toFixed(1)}%)
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   )
                 })}
-              </tbody>
-            </table>
+              </div>
+            )}
+          </div>
+
+          {/* Recent Trades */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+            <h2 className="text-2xl font-bold text-white mb-4">Trade History</h2>
+            
+            {trades.length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                No trades yet
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {trades.slice(0, 20).map(trade => (
+                  <div key={trade.id} className="bg-white/5 rounded-lg p-3 border border-white/10">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                          trade.type === 'BUY' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                        }`}>
+                          {trade.type}
+                        </span>
+                        <span className="text-white font-bold">{trade.symbol}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-white font-semibold">${trade.total.toFixed(2)}</div>
+                        <div className="text-gray-400 text-xs">
+                          {trade.shares} @ ${trade.price.toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-gray-500 text-xs mt-1">
+                      {new Date(trade.date).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* What This Means Section */}
-        <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 backdrop-blur-sm rounded-xl p-8 border border-white/20">
-          <h2 className="text-2xl font-bold text-white mb-4">💡 What This Means</h2>
+        {/* Trade Modal */}
+        {showTradeModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-xl p-8 max-w-md w-full mx-4 border border-white/20">
+              <h3 className="text-2xl font-bold text-white mb-6">
+                {tradeType === 'BUY' ? '🟢 Buy Stock' : '🔴 Sell Stock'}
+              </h3>
+              
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-gray-300 text-sm mb-2">Stock Symbol</label>
+                  {tradeType === 'BUY' ? (
+                    <select
+                      className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                      value={tradeData.symbol}
+                      onChange={(e) => setTradeData({...tradeData, symbol: e.target.value})}
+                    >
+                      <option value="">Select stock...</option>
+                      {availableSymbols.map(symbol => (
+                        <option key={symbol} value={symbol}>{symbol}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                      value={tradeData.symbol}
+                      onChange={(e) => setTradeData({...tradeData, symbol: e.target.value})}
+                    >
+                      <option value="">Select stock...</option>
+                      {positions.map(p => (
+                        <option key={p.symbol} value={p.symbol}>{p.symbol} ({p.shares} shares)</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                
+                <div>
+                  <label className="block text-gray-300 text-sm mb-2">Number of Shares</label>
+                  <input
+                    type="number"
+                    placeholder="100"
+                    className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                    value={tradeData.shares || ''}
+                    onChange={(e) => setTradeData({...tradeData, shares: parseInt(e.target.value) || 0})}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-gray-300 text-sm mb-2">Price per Share</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="150.00"
+                    className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                    value={tradeData.price || ''}
+                    onChange={(e) => setTradeData({...tradeData, price: parseFloat(e.target.value) || 0})}
+                  />
+                </div>
+
+                {tradeData.shares > 0 && tradeData.price > 0 && (
+                  <div className="bg-blue-500/20 rounded-lg p-4 border border-blue-500/30">
+                    <div className="text-gray-300 text-sm">Total {tradeType === 'BUY' ? 'Cost' : 'Proceeds'}</div>
+                    <div className="text-2xl font-bold text-white">
+                      ${(tradeData.shares * tradeData.price).toFixed(2)}
+                    </div>
+                    {tradeType === 'BUY' && (
+                      <div className="text-gray-400 text-xs mt-1">
+                        Balance after: ${(balance - (tradeData.shares * tradeData.price)).toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setShowTradeModal(false)}
+                  className="flex-1 px-4 py-3 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={executeTrade}
+                  className={`flex-1 px-4 py-3 font-semibold rounded-lg transition ${
+                    tradeType === 'BUY'
+                      ? 'bg-green-500 hover:bg-green-600 text-white'
+                      : 'bg-red-500 hover:bg-red-600 text-white'
+                  }`}
+                >
+                  {tradeType === 'BUY' ? 'Buy' : 'Sell'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Info */}
+        <div className="bg-gradient-to-r from-green-500/20 to-blue-500/20 backdrop-blur-sm rounded-xl p-8 border border-white/20">
+          <h2 className="text-2xl font-bold text-white mb-4">📊 How Paper Trading Works</h2>
           <div className="space-y-4 text-gray-300">
             <p>
-              <strong className="text-white">Paper Trading:</strong> Practice trading with $100,000 virtual money. Test strategies, learn market mechanics, and build confidence - all without risking real capital.
+              <strong className="text-white">Virtual Money:</strong> Start with $100,000 in fake money. Practice without risk!
             </p>
             <p>
-              <strong className="text-white">Understanding P&L:</strong> Profit & Loss shows how your trades perform. Green means profit, red means loss. Track P&L both in dollars and percentage to understand relative performance.
+              <strong className="text-white">Real Prices:</strong> Use actual stock prices from AI picks. Simulate real market conditions.
             </p>
             <p>
-              <strong className="text-white">Portfolio Metrics:</strong> Total Value = Cash + Invested positions. Watch how your decisions impact overall portfolio performance over time.
+              <strong className="text-white">Build Strategy:</strong> Test different approaches. Learn what works before using real money.
             </p>
             <p>
-              <strong className="text-white">Buy vs Sell:</strong> BUY means you expect price to go up (go long). SELL means you expect price to go down (go short). Both can be profitable with correct predictions.
+              <strong className="text-white">Track Performance:</strong> Monitor your gains and losses. See how you'd do in the real market.
             </p>
-            <p>
-              <strong className="text-white">Trading Strategy:</strong> Start small, diversify across multiple stocks, use stop-losses to limit downside, and take profits when targets are hit. Learn discipline here before using real money.
-            </p>
-            <p>
-              <strong className="text-white">Key Lesson:</strong> Successful trading requires patience, discipline, and risk management. Paper trading lets you fail safely and learn from mistakes without financial consequences.
+            <p className="text-yellow-400 text-sm">
+              💡 Tip: Paper trading is perfect for testing AI stock picks before committing real capital!
             </p>
           </div>
         </div>
