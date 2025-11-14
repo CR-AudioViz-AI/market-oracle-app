@@ -44,7 +44,7 @@ export default function ChartsPage() {
       .eq('status', 'OPEN')
 
     if (picks) {
-      const uniqueSymbols = [...new Set(picks.map(p => p.symbol))]
+      const uniqueSymbols = Array.from(new Set(picks.map(p => p.symbol)))
       setSymbols(uniqueSymbols)
       if (uniqueSymbols.length > 0 && !selectedSymbol) {
         setSelectedSymbol(uniqueSymbols[0])
