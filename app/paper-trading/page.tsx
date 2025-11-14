@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 
@@ -9,460 +9,467 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-interface PaperPosition {
+interface Position {
   id: string
   symbol: string
-  shares: number
-  entryPrice: number
-  currentPrice: number
-  entryDate: string
+  quantity: number
+  entry_price: number
+  current_price: number
+  total_cost: number
+  current_value: number
+  gain_loss: number
+  gain_loss_percent: number
 }
 
 interface Trade {
   id: string
   symbol: string
-  type: 'BUY' | 'SELL'
-  shares: number
+  action: 'BUY' | 'SELL'
+  quantity: number
   price: number
   total: number
-  date: string
+  timestamp: string
 }
 
 export default function PaperTradingPage() {
-  const [balance, setBalance] = useState(100000) // Starting $100k
-  const [positions, setPositions] = useState<PaperPosition[]>([])
+  const [cash, setCash] = useState(100000)
+  const [positions, setPositions] = useState<Position[]>([])
   const [trades, setTrades] = useState<Trade[]>([])
-  const [showTradeModal, setShowTradeModal] = useState(false)
-  const [tradeType, setTradeType] = useState<'BUY' | 'SELL'>('BUY')
-  const [tradeData, setTradeData] = useState({
-    symbol: '',
-    shares: 0,
-    price: 0
-  })
-  const [availableSymbols, setAvailableSymbols] = useState<string[]>([])
+  const [userId, setUserId] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  // Buy/Sell form state
+  const [selectedSymbol, setSelectedSymbol] = useState('')
+  const [quantity, setQuantity] = useState(1)
+  const [action, setAction] = useState<'BUY' | 'SELL'>('BUY')
+  const [availableStocks, setAvailableStocks] = useState<string[]>([])
 
   useEffect(() => {
-    loadPaperAccount()
-    loadAvailableSymbols()
+    // Get or create user ID
+    let uid = localStorage.getItem('market_oracle_user_id')
+    if (!uid) {
+      uid = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      localStorage.setItem('market_oracle_user_id', uid)
+    }
+    setUserId(uid)
+
+    loadPortfolio()
+    loadAvailableStocks()
   }, [])
 
-  async function loadAvailableSymbols() {
-    const { data: picks } = await supabase
+  async function loadAvailableStocks() {
+    const { data } = await supabase
       .from('stock_picks')
       .select('symbol')
       .eq('status', 'OPEN')
 
-    if (picks) {
-      const symbols = [...new Set(picks.map(p => p.symbol))]
-      setAvailableSymbols(symbols)
+    if (data) {
+      const symbols = Array.from(new Set(data.map(p => p.symbol)))
+      setAvailableStocks(symbols)
     }
   }
 
-  function loadPaperAccount() {
-    // Load from localStorage if exists
-    const savedBalance = localStorage.getItem('paper_balance')
-    const savedPositions = localStorage.getItem('paper_positions')
-    const savedTrades = localStorage.getItem('paper_trades')
+  async function loadPortfolio() {
+    // Load portfolio from localStorage for now
+    const savedPortfolio = localStorage.getItem('paper_trading_portfolio')
+    if (savedPortfolio) {
+      const portfolio = JSON.parse(savedPortfolio)
+      setCash(portfolio.cash || 100000)
+      setPositions(portfolio.positions || [])
+      setTrades(portfolio.trades || [])
+    }
 
-    if (savedBalance) setBalance(parseFloat(savedBalance))
-    if (savedPositions) setPositions(JSON.parse(savedPositions))
-    if (savedTrades) setTrades(JSON.parse(savedTrades))
+    setLoading(false)
   }
 
-  function savePaperAccount() {
-    localStorage.setItem('paper_balance', balance.toString())
-    localStorage.setItem('paper_positions', JSON.stringify(positions))
-    localStorage.setItem('paper_trades', JSON.stringify(trades))
+  async function getCurrentPrice(symbol: string): Promise<number> {
+    try {
+      const response = await fetch(`/api/stock-price?symbols=${symbol}`)
+      const data = await response.json()
+      return data.prices[symbol]?.price || 0
+    } catch (error) {
+      // Fallback to entry price from database
+      const { data } = await supabase
+        .from('stock_picks')
+        .select('entry_price')
+        .eq('symbol', symbol)
+        .eq('status', 'OPEN')
+        .limit(1)
+        .single()
+
+      return data?.entry_price || 100
+    }
   }
 
-  function executeTrade() {
-    const { symbol, shares, price } = tradeData
-    
-    if (!symbol || shares <= 0 || price <= 0) {
-      alert('Please fill all fields correctly')
+  async function executeTrade() {
+    if (!selectedSymbol || quantity <= 0) {
+      alert('Please select a stock and enter a valid quantity')
       return
     }
 
-    const total = shares * price
+    const currentPrice = await getCurrentPrice(selectedSymbol)
+    const total = currentPrice * quantity
 
-    if (tradeType === 'BUY') {
-      if (total > balance) {
+    if (action === 'BUY') {
+      if (total > cash) {
         alert('Insufficient funds!')
         return
       }
 
-      // Check if position exists
-      const existingPosition = positions.find(p => p.symbol === symbol.toUpperCase())
-      
+      // Buy stock
+      const existingPosition = positions.find(p => p.symbol === selectedSymbol)
+
       if (existingPosition) {
         // Add to existing position
-        const newShares = existingPosition.shares + shares
-        const newAvgPrice = ((existingPosition.entryPrice * existingPosition.shares) + total) / newShares
-        
+        const newQuantity = existingPosition.quantity + quantity
+        const newAvgPrice = ((existingPosition.entry_price * existingPosition.quantity) + (currentPrice * quantity)) / newQuantity
+
         setPositions(positions.map(p =>
-          p.symbol === symbol.toUpperCase()
-            ? { ...p, shares: newShares, entryPrice: newAvgPrice }
+          p.symbol === selectedSymbol
+            ? {
+                ...p,
+                quantity: newQuantity,
+                entry_price: newAvgPrice,
+                total_cost: newAvgPrice * newQuantity,
+                current_price: currentPrice,
+                current_value: currentPrice * newQuantity,
+                gain_loss: (currentPrice - newAvgPrice) * newQuantity,
+                gain_loss_percent: ((currentPrice - newAvgPrice) / newAvgPrice) * 100
+              }
             : p
         ))
       } else {
         // Create new position
-        const newPosition: PaperPosition = {
-          id: Date.now().toString(),
-          symbol: symbol.toUpperCase(),
-          shares,
-          entryPrice: price,
-          currentPrice: price,
-          entryDate: new Date().toISOString()
-        }
-        setPositions([...positions, newPosition])
+        setPositions([...positions, {
+          id: `pos_${Date.now()}`,
+          symbol: selectedSymbol,
+          quantity,
+          entry_price: currentPrice,
+          current_price: currentPrice,
+          total_cost: total,
+          current_value: total,
+          gain_loss: 0,
+          gain_loss_percent: 0
+        }])
       }
 
-      setBalance(balance - total)
+      setCash(cash - total)
+
     } else {
-      // SELL
-      const position = positions.find(p => p.symbol === symbol.toUpperCase())
-      
-      if (!position) {
-        alert('You don\'t own this stock!')
+      // Sell stock
+      const position = positions.find(p => p.symbol === selectedSymbol)
+
+      if (!position || position.quantity < quantity) {
+        alert('Insufficient shares to sell!')
         return
       }
 
-      if (shares > position.shares) {
-        alert(`You only own ${position.shares} shares!`)
-        return
-      }
-
-      // Update or remove position
-      if (shares === position.shares) {
-        setPositions(positions.filter(p => p.symbol !== symbol.toUpperCase()))
+      if (position.quantity === quantity) {
+        // Close position
+        setPositions(positions.filter(p => p.symbol !== selectedSymbol))
       } else {
+        // Reduce position
         setPositions(positions.map(p =>
-          p.symbol === symbol.toUpperCase()
-            ? { ...p, shares: p.shares - shares }
+          p.symbol === selectedSymbol
+            ? {
+                ...p,
+                quantity: p.quantity - quantity,
+                total_cost: p.entry_price * (p.quantity - quantity),
+                current_value: currentPrice * (p.quantity - quantity),
+                gain_loss: (currentPrice - p.entry_price) * (p.quantity - quantity),
+                gain_loss_percent: ((currentPrice - p.entry_price) / p.entry_price) * 100
+              }
             : p
         ))
       }
 
-      setBalance(balance + total)
+      setCash(cash + total)
     }
 
     // Record trade
     const newTrade: Trade = {
-      id: Date.now().toString(),
-      symbol: symbol.toUpperCase(),
-      type: tradeType,
-      shares,
-      price,
+      id: `trade_${Date.now()}`,
+      symbol: selectedSymbol,
+      action,
+      quantity,
+      price: currentPrice,
       total,
-      date: new Date().toISOString()
+      timestamp: new Date().toISOString()
     }
+
     setTrades([newTrade, ...trades])
 
-    // Reset and close
-    setTradeData({ symbol: '', shares: 0, price: 0 })
-    setShowTradeModal(false)
-
     // Save to localStorage
-    setTimeout(savePaperAccount, 100)
+    savePortfolio()
+
+    // Reset form
+    setSelectedSymbol('')
+    setQuantity(1)
+
+    alert(`${action} order executed successfully!`)
   }
 
-  function resetAccount() {
-    if (confirm('Reset your paper trading account? This will erase all positions and trades.')) {
-      setBalance(100000)
-      setPositions([])
-      setTrades([])
-      localStorage.removeItem('paper_balance')
-      localStorage.removeItem('paper_positions')
-      localStorage.removeItem('paper_trades')
+  function savePortfolio() {
+    const portfolio = {
+      cash,
+      positions,
+      trades
     }
+    localStorage.setItem('paper_trading_portfolio', JSON.stringify(portfolio))
   }
 
-  function calculatePortfolioValue() {
-    const positionsValue = positions.reduce((sum, p) => sum + (p.currentPrice * p.shares), 0)
-    return balance + positionsValue
-  }
+  useEffect(() => {
+    if (!loading) {
+      savePortfolio()
+    }
+  }, [cash, positions, trades])
 
-  function calculateTotalGainLoss() {
-    const totalValue = calculatePortfolioValue()
-    return totalValue - 100000
-  }
+  const portfolioValue = positions.reduce((sum, p) => sum + p.current_value, 0)
+  const totalValue = cash + portfolioValue
+  const totalGainLoss = totalValue - 100000
+  const totalGainLossPercent = ((totalValue - 100000) / 100000) * 100
 
-  const totalValue = calculatePortfolioValue()
-  const totalGainLoss = calculateTotalGainLoss()
-  const totalGainLossPercent = (totalGainLoss / 100000) * 100
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
+        <div className="text-white text-2xl">Loading paper trading...</div>
+      </div>
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 text-white p-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <Link href="/" className="text-blue-400 hover:text-blue-300 mb-4 inline-block">
-            ← Back to Dashboard
-          </Link>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold text-white mb-2">Paper Trading</h1>
-              <p className="text-gray-300">Practice trading with virtual money - $100,000 starting balance</p>
-            </div>
-            <button
-              onClick={resetAccount}
-              className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 font-semibold rounded-lg transition text-sm"
-            >
-              Reset Account
-            </button>
-          </div>
-        </div>
+        <Link href="/" className="text-blue-400 hover:text-blue-300 mb-6 inline-block">
+          ← Back to Dashboard
+        </Link>
 
-        {/* Account Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="text-gray-300 text-sm mb-1">Cash Balance</div>
-            <div className="text-3xl font-bold text-white">${balance.toFixed(2)}</div>
+        <h1 className="text-4xl font-bold mb-2">📝 Paper Trading</h1>
+        <p className="text-slate-400 mb-8">
+          Practice trading with $100,000 virtual cash - No real money at risk
+        </p>
+
+        {/* Portfolio Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
+            <div className="text-sm text-slate-400 mb-1">Cash Available</div>
+            <div className="text-3xl font-bold text-green-400">
+              ${cash.toLocaleString(undefined, {maximumFractionDigits: 2})}
+            </div>
           </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="text-gray-300 text-sm mb-1">Total Value</div>
-            <div className="text-3xl font-bold text-white">${totalValue.toFixed(2)}</div>
+
+          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
+            <div className="text-sm text-slate-400 mb-1">Positions Value</div>
+            <div className="text-3xl font-bold">
+              ${portfolioValue.toLocaleString(undefined, {maximumFractionDigits: 2})}
+            </div>
           </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="text-gray-300 text-sm mb-1">Gain/Loss</div>
+
+          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
+            <div className="text-sm text-slate-400 mb-1">Total Value</div>
+            <div className="text-3xl font-bold text-blue-400">
+              ${totalValue.toLocaleString(undefined, {maximumFractionDigits: 2})}
+            </div>
+          </div>
+
+          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
+            <div className="text-sm text-slate-400 mb-1">Total Gain/Loss</div>
             <div className={`text-3xl font-bold ${totalGainLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {totalGainLoss >= 0 ? '+' : ''}${totalGainLoss.toFixed(2)}
+              {totalGainLoss >= 0 ? '+' : ''}${totalGainLoss.toLocaleString(undefined, {maximumFractionDigits: 2})}
             </div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="text-gray-300 text-sm mb-1">Return</div>
-            <div className={`text-3xl font-bold ${totalGainLossPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {totalGainLossPercent >= 0 ? '+' : ''}{totalGainLossPercent.toFixed(2)}%
+            <div className={`text-sm ${totalGainLoss >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+              {totalGainLoss >= 0 ? '+' : ''}{totalGainLossPercent.toFixed(2)}%
             </div>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-4 mb-8">
-          <button
-            onClick={() => {
-              setTradeType('BUY')
-              setShowTradeModal(true)
-            }}
-            className="flex-1 px-6 py-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl transition text-lg"
-          >
-            🟢 BUY Stock
-          </button>
-          <button
-            onClick={() => {
-              setTradeType('SELL')
-              setShowTradeModal(true)
-            }}
-            className="flex-1 px-6 py-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition text-lg"
-          >
-            🔴 SELL Stock
-          </button>
-        </div>
+        {/* Trade Form */}
+        <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 mb-8">
+          <h2 className="text-2xl font-bold mb-6">Execute Trade</h2>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          {/* Positions */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <h2 className="text-2xl font-bold text-white mb-4">Your Positions</h2>
-            
-            {positions.length === 0 ? (
-              <div className="text-center py-8 text-gray-400">
-                No positions yet. Click BUY to start trading!
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {positions.map(position => {
-                  const value = position.currentPrice * position.shares
-                  const cost = position.entryPrice * position.shares
-                  const gainLoss = value - cost
-                  const gainLossPercent = (gainLoss / cost) * 100
-
-                  return (
-                    <div key={position.id} className="bg-white/5 rounded-lg p-4 border border-white/10">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-xl font-bold text-white">{position.symbol}</div>
-                        <div className="text-sm text-gray-400">{position.shares} shares</div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <div className="text-gray-400">Avg Price</div>
-                          <div className="text-white font-semibold">${position.entryPrice.toFixed(2)}</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400">Current</div>
-                          <div className="text-white font-semibold">${position.currentPrice.toFixed(2)}</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400">Value</div>
-                          <div className="text-white font-semibold">${value.toFixed(2)}</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400">Gain/Loss</div>
-                          <div className={`font-semibold ${gainLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {gainLoss >= 0 ? '+' : ''}${gainLoss.toFixed(2)} ({gainLossPercent.toFixed(1)}%)
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Recent Trades */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <h2 className="text-2xl font-bold text-white mb-4">Trade History</h2>
-            
-            {trades.length === 0 ? (
-              <div className="text-center py-8 text-gray-400">
-                No trades yet
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {trades.slice(0, 20).map(trade => (
-                  <div key={trade.id} className="bg-white/5 rounded-lg p-3 border border-white/10">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className={`px-2 py-1 rounded text-xs font-bold ${
-                          trade.type === 'BUY' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
-                        }`}>
-                          {trade.type}
-                        </span>
-                        <span className="text-white font-bold">{trade.symbol}</span>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-white font-semibold">${trade.total.toFixed(2)}</div>
-                        <div className="text-gray-400 text-xs">
-                          {trade.shares} @ ${trade.price.toFixed(2)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-gray-500 text-xs mt-1">
-                      {new Date(trade.date).toLocaleString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Trade Modal */}
-        {showTradeModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-xl p-8 max-w-md w-full mx-4 border border-white/20">
-              <h3 className="text-2xl font-bold text-white mb-6">
-                {tradeType === 'BUY' ? '🟢 Buy Stock' : '🔴 Sell Stock'}
-              </h3>
-              
-              <div className="space-y-4 mb-6">
-                <div>
-                  <label className="block text-gray-300 text-sm mb-2">Stock Symbol</label>
-                  {tradeType === 'BUY' ? (
-                    <select
-                      className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                      value={tradeData.symbol}
-                      onChange={(e) => setTradeData({...tradeData, symbol: e.target.value})}
-                    >
-                      <option value="">Select stock...</option>
-                      {availableSymbols.map(symbol => (
-                        <option key={symbol} value={symbol}>{symbol}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <select
-                      className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                      value={tradeData.symbol}
-                      onChange={(e) => setTradeData({...tradeData, symbol: e.target.value})}
-                    >
-                      <option value="">Select stock...</option>
-                      {positions.map(p => (
-                        <option key={p.symbol} value={p.symbol}>{p.symbol} ({p.shares} shares)</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                
-                <div>
-                  <label className="block text-gray-300 text-sm mb-2">Number of Shares</label>
-                  <input
-                    type="number"
-                    placeholder="100"
-                    className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                    value={tradeData.shares || ''}
-                    onChange={(e) => setTradeData({...tradeData, shares: parseInt(e.target.value) || 0})}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-gray-300 text-sm mb-2">Price per Share</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="150.00"
-                    className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                    value={tradeData.price || ''}
-                    onChange={(e) => setTradeData({...tradeData, price: parseFloat(e.target.value) || 0})}
-                  />
-                </div>
-
-                {tradeData.shares > 0 && tradeData.price > 0 && (
-                  <div className="bg-blue-500/20 rounded-lg p-4 border border-blue-500/30">
-                    <div className="text-gray-300 text-sm">Total {tradeType === 'BUY' ? 'Cost' : 'Proceeds'}</div>
-                    <div className="text-2xl font-bold text-white">
-                      ${(tradeData.shares * tradeData.price).toFixed(2)}
-                    </div>
-                    {tradeType === 'BUY' && (
-                      <div className="text-gray-400 text-xs mt-1">
-                        Balance after: ${(balance - (tradeData.shares * tradeData.price)).toFixed(2)}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                Action
+              </label>
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setShowTradeModal(false)}
-                  className="flex-1 px-4 py-3 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={executeTrade}
-                  className={`flex-1 px-4 py-3 font-semibold rounded-lg transition ${
-                    tradeType === 'BUY'
-                      ? 'bg-green-500 hover:bg-green-600 text-white'
-                      : 'bg-red-500 hover:bg-red-600 text-white'
+                  onClick={() => setAction('BUY')}
+                  className={`flex-1 py-2 rounded-lg font-semibold transition ${
+                    action === 'BUY'
+                      ? 'bg-green-500 text-white'
+                      : 'bg-white/5 text-slate-400 hover:bg-white/10'
                   }`}
                 >
-                  {tradeType === 'BUY' ? 'Buy' : 'Sell'}
+                  BUY
+                </button>
+                <button
+                  onClick={() => setAction('SELL')}
+                  className={`flex-1 py-2 rounded-lg font-semibold transition ${
+                    action === 'SELL'
+                      ? 'bg-red-500 text-white'
+                      : 'bg-white/5 text-slate-400 hover:bg-white/10'
+                  }`}
+                >
+                  SELL
                 </button>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Info */}
-        <div className="bg-gradient-to-r from-green-500/20 to-blue-500/20 backdrop-blur-sm rounded-xl p-8 border border-white/20">
-          <h2 className="text-2xl font-bold text-white mb-4">📊 How Paper Trading Works</h2>
-          <div className="space-y-4 text-gray-300">
-            <p>
-              <strong className="text-white">Virtual Money:</strong> Start with $100,000 in fake money. Practice without risk!
-            </p>
-            <p>
-              <strong className="text-white">Real Prices:</strong> Use actual stock prices from AI picks. Simulate real market conditions.
-            </p>
-            <p>
-              <strong className="text-white">Build Strategy:</strong> Test different approaches. Learn what works before using real money.
-            </p>
-            <p>
-              <strong className="text-white">Track Performance:</strong> Monitor your gains and losses. See how you'd do in the real market.
-            </p>
-            <p className="text-yellow-400 text-sm">
-              💡 Tip: Paper trading is perfect for testing AI stock picks before committing real capital!
-            </p>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                Stock Symbol
+              </label>
+              <select
+                value={selectedSymbol}
+                onChange={(e) => setSelectedSymbol(e.target.value)}
+                className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white"
+              >
+                <option value="">Select stock...</option>
+                {availableStocks.map(symbol => (
+                  <option key={symbol} value={symbol}>{symbol}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                Quantity
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={quantity}
+                onChange={(e) => setQuantity(Number(e.target.value))}
+                className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white"
+              />
+            </div>
+
+            <div className="flex items-end">
+              <button
+                onClick={executeTrade}
+                disabled={!selectedSymbol || quantity <= 0}
+                className={`w-full py-2 rounded-lg font-semibold transition ${
+                  action === 'BUY'
+                    ? 'bg-green-500 hover:bg-green-600'
+                    : 'bg-red-500 hover:bg-red-600'
+                } disabled:bg-slate-600 text-white`}
+              >
+                {action} {selectedSymbol || 'Stock'}
+              </button>
+            </div>
           </div>
+        </div>
+
+        {/* Current Positions */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-4">Open Positions ({positions.length})</h2>
+
+          {positions.length > 0 ? (
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-white/5">
+                  <tr>
+                    <th className="px-6 py-3 text-left">Symbol</th>
+                    <th className="px-6 py-3 text-right">Quantity</th>
+                    <th className="px-6 py-3 text-right">Avg Price</th>
+                    <th className="px-6 py-3 text-right">Current Price</th>
+                    <th className="px-6 py-3 text-right">Total Value</th>
+                    <th className="px-6 py-3 text-right">Gain/Loss</th>
+                    <th className="px-6 py-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {positions.map((position) => (
+                    <tr key={position.id} className="border-t border-white/10">
+                      <td className="px-6 py-4 font-bold">{position.symbol}</td>
+                      <td className="px-6 py-4 text-right">{position.quantity}</td>
+                      <td className="px-6 py-4 text-right">${position.entry_price.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right">${position.current_price.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right">${position.current_value.toFixed(2)}</td>
+                      <td className={`px-6 py-4 text-right font-semibold ${
+                        position.gain_loss >= 0 ? 'text-green-400' : 'text-red-400'
+                      }`}>
+                        {position.gain_loss >= 0 ? '+' : ''}${position.gain_loss.toFixed(2)}
+                        <br />
+                        <span className="text-xs">
+                          ({position.gain_loss >= 0 ? '+' : ''}{position.gain_loss_percent.toFixed(2)}%)
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button
+                          onClick={() => {
+                            setSelectedSymbol(position.symbol)
+                            setAction('SELL')
+                            setQuantity(position.quantity)
+                          }}
+                          className="px-4 py-1 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 transition text-sm"
+                        >
+                          Sell
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-12 border border-white/10 text-center">
+              <div className="text-4xl mb-4">📊</div>
+              <div className="text-slate-400">No open positions. Start trading above!</div>
+            </div>
+          )}
+        </div>
+
+        {/* Trade History */}
+        <div>
+          <h2 className="text-2xl font-bold mb-4">Recent Trades ({trades.length})</h2>
+
+          {trades.length > 0 ? (
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-white/5">
+                  <tr>
+                    <th className="px-6 py-3 text-left">Time</th>
+                    <th className="px-6 py-3 text-left">Action</th>
+                    <th className="px-6 py-3 text-left">Symbol</th>
+                    <th className="px-6 py-3 text-right">Quantity</th>
+                    <th className="px-6 py-3 text-right">Price</th>
+                    <th className="px-6 py-3 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades.slice(0, 20).map((trade) => (
+                    <tr key={trade.id} className="border-t border-white/10">
+                      <td className="px-6 py-4 text-sm text-slate-400">
+                        {new Date(trade.timestamp).toLocaleString()}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                          trade.action === 'BUY'
+                            ? 'bg-green-500/20 text-green-300'
+                            : 'bg-red-500/20 text-red-300'
+                        }`}>
+                          {trade.action}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 font-semibold">{trade.symbol}</td>
+                      <td className="px-6 py-4 text-right">{trade.quantity}</td>
+                      <td className="px-6 py-4 text-right">${trade.price.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right font-semibold">
+                        ${trade.total.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-12 border border-white/10 text-center">
+              <div className="text-4xl mb-4">📜</div>
+              <div className="text-slate-400">No trades yet. Execute your first trade above!</div>
+            </div>
+          )}
         </div>
       </div>
     </div>
