@@ -53,7 +53,7 @@ export default function PaperTradingPage() {
       .eq('status', 'OPEN')
 
     if (picks) {
-      const symbols = [...new Set(picks.map(p => p.symbol))]
+      const symbols = Array.from(new Set(picks.map(p => p.symbol)))
       setAvailableSymbols(symbols)
     }
   }
@@ -468,3 +468,4 @@ export default function PaperTradingPage() {
     </div>
   )
 }
+
