@@ -29,20 +29,32 @@ interface StockPrice {
   changePercent: number
 }
 
+interface HotPick {
+  symbol: string
+  picks: StockPick[]
+  aiCount: number
+  avgConfidence: number
+  highestConfidence: number
+  entryPrice: number
+  targetPrice: number
+}
+
 export default function DashboardPage() {
   const [picks, setPicks] = useState<StockPick[]>([])
   const [prices, setPrices] = useState<Record<string, StockPrice>>({})
   const [aiModelCount, setAiModelCount] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null)
+  const [hotPicks, setHotPicks] = useState<HotPick[]>([])
 
   useEffect(() => {
     loadDashboardData()
     
     // Auto-refresh prices every 15 minutes
     const refreshInterval = setInterval(() => {
-      loadPrices(picks.map(p => p.symbol))
+      if (picks.length > 0) {
+        loadPrices(picks.map(p => p.symbol))
+      }
     }, 15 * 60 * 1000)
 
     return () => clearInterval(refreshInterval)
@@ -51,13 +63,14 @@ export default function DashboardPage() {
   useEffect(() => {
     if (picks.length > 0) {
       loadPrices(picks.map(p => p.symbol))
+      calculateHotPicks()
     }
   }, [picks])
 
   async function loadDashboardData() {
     setLoading(true)
     
-    // Load ALL active picks (not limited to 20)
+    // Load ALL active picks
     const { data: picksData } = await supabase
       .from('stock_picks')
       .select('*')
@@ -71,7 +84,7 @@ export default function DashboardPage() {
     // Get REAL AI model count from database
     const { data: modelsData } = await supabase
       .from('ai_models')
-      .select('id, ai_name, is_active')
+      .select('id, display_name, is_active')
       .eq('is_active', true)
 
     if (modelsData) {
@@ -85,9 +98,7 @@ export default function DashboardPage() {
     if (symbols.length === 0) return
 
     try {
-      // Remove duplicates
       const uniqueSymbols = Array.from(new Set(symbols))
-      
       const response = await fetch(`/api/stock-price?symbols=${uniqueSymbols.join(',')}`)
       
       if (!response.ok) {
@@ -106,10 +117,53 @@ export default function DashboardPage() {
     }
   }
 
+  function calculateHotPicks() {
+    // Group picks by symbol
+    const symbolGroups: Record<string, StockPick[]> = {}
+    
+    picks.forEach(pick => {
+      if (!symbolGroups[pick.symbol]) {
+        symbolGroups[pick.symbol] = []
+      }
+      symbolGroups[pick.symbol].push(pick)
+    })
+
+    // Calculate hot picks: stocks with 2+ AI picks OR 85%+ confidence
+    const hot: HotPick[] = []
+    
+    Object.entries(symbolGroups).forEach(([symbol, stockPicks]) => {
+      const aiCount = stockPicks.length
+      const avgConfidence = stockPicks.reduce((sum, p) => sum + p.confidence_score, 0) / aiCount
+      const highestConfidence = Math.max(...stockPicks.map(p => p.confidence_score))
+      
+      // Hot pick criteria: Multiple AIs OR very high confidence
+      if (aiCount >= 2 || highestConfidence >= 85) {
+        hot.push({
+          symbol,
+          picks: stockPicks,
+          aiCount,
+          avgConfidence,
+          highestConfidence,
+          entryPrice: stockPicks[0].entry_price,
+          targetPrice: stockPicks[0].target_price
+        })
+      }
+    })
+
+    // Sort by AI count first, then confidence
+    hot.sort((a, b) => {
+      if (b.aiCount !== a.aiCount) return b.aiCount - a.aiCount
+      return b.avgConfidence - a.avgConfidence
+    })
+
+    setHotPicks(hot)
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
         <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
           <div className="text-white text-3xl font-bold mb-4">Loading Market Oracle...</div>
           <div className="text-slate-400">Fetching real-time data...</div>
         </div>
@@ -117,16 +171,13 @@ export default function DashboardPage() {
     )
   }
 
-  // Group picks by AI
-  const aiGroups = picks.reduce((acc, pick) => {
-    if (!acc[pick.ai_name]) {
-      acc[pick.ai_name] = []
-    }
-    acc[pick.ai_name].push(pick)
-    return acc
-  }, {} as Record<string, StockPick[]>)
+  // Calculate portfolio value
+  const portfolioValue = picks.reduce((sum, p) => {
+    const currentPrice = prices[p.symbol]?.price || p.entry_price
+    return sum + currentPrice
+  }, 0)
 
-  // Calculate top performers
+  // Calculate top performer
   const picksWithGains = picks.map(pick => {
     const currentPrice = prices[pick.symbol]?.price || pick.entry_price
     const gain = ((currentPrice - pick.entry_price) / pick.entry_price) * 100
@@ -134,18 +185,22 @@ export default function DashboardPage() {
   }).sort((a, b) => b.gain - a.gain)
 
   const topPerformer = picksWithGains[0]
-  const worstPerformer = picksWithGains[picksWithGains.length - 1]
+
+  // Calculate average confidence
+  const avgConfidence = picks.length > 0 
+    ? (picks.reduce((sum, p) => sum + p.confidence_score, 0) / picks.length).toFixed(0)
+    : 0
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 text-white">
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-brand-cyan to-brand-navy">
+          <h1 className="text-5xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-600">
             AI Stock Battle Dashboard
           </h1>
           <p className="text-xl text-slate-300">
-            {aiModelCount} AI Models | {picks.length} Active Picks | Real-Time Data
+            Real-Time AI Stock Picks | Live Market Data | Professional Analytics
           </p>
           {lastPriceUpdate && (
             <p className="text-sm text-slate-500 mt-2">
@@ -154,110 +209,183 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Stats Summary */}
+        {/* CLICKABLE Stats Summary */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-brand-cyan/30 transition cursor-pointer">
+          <Link href="/all-picks" className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-blue-500/50 transition-all hover:scale-105 cursor-pointer group">
             <div className="text-slate-400 text-sm mb-1">Total Active Picks</div>
-            <div className="text-4xl font-bold text-white">{picks.length}</div>
-            <div className="text-xs text-slate-500 mt-2">All AI picks combined</div>
-          </div>
+            <div className="text-4xl font-bold text-white group-hover:text-blue-400 transition">{picks.length}</div>
+            <div className="text-xs text-slate-500 mt-2">Click to view all picks →</div>
+          </Link>
           
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-brand-cyan/30 transition cursor-pointer">
+          <Link href="/ai-models" className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-cyan-500/50 transition-all hover:scale-105 cursor-pointer group">
             <div className="text-slate-400 text-sm mb-1">AI Models Active</div>
-            <div className="text-4xl font-bold text-brand-cyan">{aiModelCount}</div>
-            <div className="text-xs text-slate-500 mt-2">{Object.keys(aiGroups).join(', ')}</div>
-          </div>
+            <div className="text-4xl font-bold text-cyan-400 group-hover:text-cyan-300 transition">{aiModelCount}</div>
+            <div className="text-xs text-slate-500 mt-2">View AI model details →</div>
+          </Link>
           
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-green-500/30 transition cursor-pointer">
+          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-green-500/50 transition-all hover:scale-105 cursor-pointer group relative">
             <div className="text-slate-400 text-sm mb-1">Avg Confidence</div>
-            <div className="text-4xl font-bold text-green-400">
-              {picks.length > 0 ? (picks.reduce((sum, p) => sum + p.confidence_score, 0) / picks.length).toFixed(0) : 0}%
+            <div className="text-4xl font-bold text-green-400 group-hover:text-green-300 transition">{avgConfidence}%</div>
+            <div className="text-xs text-slate-500 mt-2">Weighted average of all AI picks</div>
+            
+            {/* Tooltip on hover */}
+            <div className="absolute top-full left-0 right-0 mt-2 p-4 bg-slate-900 rounded-lg border border-green-500/30 opacity-0 group-hover:opacity-100 transition-opacity z-10 text-xs">
+              <strong>How It's Calculated:</strong>
+              <p className="mt-1">Average confidence score across all {picks.length} active picks. Higher scores indicate stronger AI conviction.</p>
             </div>
-            <div className="text-xs text-slate-500 mt-2">Weighted average</div>
           </div>
           
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-purple-500/30 transition cursor-pointer">
+          <Link href={topPerformer ? `/stock/${topPerformer.symbol}` : '#'} className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-purple-500/50 transition-all hover:scale-105 cursor-pointer group">
             <div className="text-slate-400 text-sm mb-1">Top Performer</div>
-            <div className="text-2xl font-bold text-purple-400">
+            <div className="text-2xl font-bold text-purple-400 group-hover:text-purple-300 transition">
               {topPerformer ? topPerformer.symbol : 'N/A'}
             </div>
             <div className="text-sm text-green-400">
-              {topPerformer ? `+${topPerformer.gain.toFixed(1)}% (+$${(topPerformer.currentPrice - topPerformer.entry_price).toFixed(2)})` : '--'}
+              {topPerformer ? `+${topPerformer.gain.toFixed(2)}% (+$${(topPerformer.currentPrice - topPerformer.entry_price).toFixed(2)})` : '--'}
             </div>
-          </div>
+            <div className="text-xs text-slate-500 mt-1">Click for full analysis →</div>
+          </Link>
           
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-red-500/30 transition cursor-pointer">
+          <Link href="/portfolio" className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-yellow-500/50 transition-all hover:scale-105 cursor-pointer group">
             <div className="text-slate-400 text-sm mb-1">Portfolio Value</div>
-            <div className="text-4xl font-bold text-white">
-              ${picks.reduce((sum, p) => {
-                const currentPrice = prices[p.symbol]?.price || p.entry_price
-                return sum + currentPrice
-              }, 0).toLocaleString()}
+            <div className="text-3xl font-bold text-white group-hover:text-yellow-400 transition">
+              ${portfolioValue.toLocaleString(undefined, {maximumFractionDigits: 0})}
             </div>
-            <div className="text-xs text-slate-500 mt-2">Real-time valuation</div>
-          </div>
+            <div className="text-xs text-slate-500 mt-2">View portfolio breakdown →</div>
+          </Link>
         </div>
+
+        {/* HOT PICKS - Multi-AI or High Confidence */}
+        {hotPicks.length > 0 && (
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-3xl font-bold">🔥 Hot Picks</h2>
+              <span className="text-sm text-slate-400">
+                Stocks with 2+ AI picks or 85%+ confidence
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {hotPicks.slice(0, 6).map((hotPick) => {
+                const priceData = prices[hotPick.symbol]
+                const currentPrice = priceData?.price || hotPick.entryPrice
+                const gain = ((currentPrice - hotPick.entryPrice) / hotPick.entryPrice) * 100
+                const isWinning = gain > 0
+
+                return (
+                  <Link
+                    key={hotPick.symbol}
+                    href={`/stock/${hotPick.symbol}`}
+                    className="bg-gradient-to-br from-orange-500/10 to-red-500/10 rounded-xl p-6 border-2 border-orange-500/30 hover:border-orange-500/60 transition-all hover:scale-105 group"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="text-3xl font-bold group-hover:text-orange-400 transition">
+                        {hotPick.symbol}
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <span className="px-3 py-1 bg-orange-500/30 text-orange-200 rounded-full text-sm font-bold">
+                          {hotPick.aiCount} AI{hotPick.aiCount > 1 ? 's' : ''}
+                        </span>
+                        <span className="text-xs text-slate-400 mt-1">
+                          {hotPick.avgConfidence.toFixed(0)}% avg confidence
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+                      <div>
+                        <div className="text-slate-400">Current Price</div>
+                        <div className={`font-semibold text-lg ${isWinning ? 'text-green-400' : 'text-red-400'}`}>
+                          ${currentPrice.toFixed(2)}
+                        </div>
+                        <div className={`text-xs ${isWinning ? 'text-green-300' : 'text-red-300'}`}>
+                          {isWinning ? '+' : ''}{gain.toFixed(1)}%
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400">Picked By</div>
+                        <div className="font-semibold text-sm">
+                          {hotPick.picks.map(p => p.ai_name).join(', ')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-orange-300 mt-2 group-hover:text-orange-200 transition">
+                      Click for full analysis & AI reasoning →
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Quick Navigation */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
-          <Link href="/portfolio" className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 hover:from-blue-500/30 hover:to-blue-600/30 border border-blue-400/30 rounded-xl p-4 text-center transition">
+          <Link href="/portfolio" className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 hover:from-blue-500/30 hover:to-blue-600/30 border border-blue-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
             <div className="text-3xl mb-2">💼</div>
             <div className="font-semibold text-sm">Portfolio</div>
           </Link>
-          <Link href="/backtesting" className="bg-gradient-to-br from-green-500/20 to-green-600/20 hover:from-green-500/30 hover:to-green-600/30 border border-green-400/30 rounded-xl p-4 text-center transition">
+          <Link href="/backtesting" className="bg-gradient-to-br from-green-500/20 to-green-600/20 hover:from-green-500/30 hover:to-green-600/30 border border-green-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
             <div className="text-3xl mb-2">📊</div>
             <div className="font-semibold text-sm">Backtesting</div>
           </Link>
-          <Link href="/voting" className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 hover:from-purple-500/30 hover:to-purple-600/30 border border-purple-400/30 rounded-xl p-4 text-center transition">
+          <Link href="/voting" className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 hover:from-purple-500/30 hover:to-purple-600/30 border border-purple-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
             <div className="text-3xl mb-2">🗳️</div>
             <div className="font-semibold text-sm">Voting</div>
           </Link>
-          <Link href="/paper-trading" className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 hover:from-yellow-500/30 hover:to-yellow-600/30 border border-yellow-400/30 rounded-xl p-4 text-center transition">
+          <Link href="/paper-trading" className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 hover:from-yellow-500/30 hover:to-yellow-600/30 border border-yellow-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
             <div className="text-3xl mb-2">📝</div>
             <div className="font-semibold text-sm">Paper Trade</div>
           </Link>
-          <Link href="/watchlist" className="bg-gradient-to-br from-pink-500/20 to-pink-600/20 hover:from-pink-500/30 hover:to-pink-600/30 border border-pink-400/30 rounded-xl p-4 text-center transition">
+          <Link href="/watchlist" className="bg-gradient-to-br from-pink-500/20 to-pink-600/20 hover:from-pink-500/30 hover:to-pink-600/30 border border-pink-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
             <div className="text-3xl mb-2">⭐</div>
             <div className="font-semibold text-sm">Watchlist</div>
           </Link>
-          <Link href="/community" className="bg-gradient-to-br from-indigo-500/20 to-indigo-600/20 hover:from-indigo-500/30 hover:to-indigo-600/30 border border-indigo-400/30 rounded-xl p-4 text-center transition">
+          <Link href="/community" className="bg-gradient-to-br from-indigo-500/20 to-indigo-600/20 hover:from-indigo-500/30 hover:to-indigo-600/30 border border-indigo-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
             <div className="text-3xl mb-2">💬</div>
             <div className="font-semibold text-sm">Community</div>
           </Link>
-          <Link href="/alerts" className="bg-gradient-to-br from-red-500/20 to-red-600/20 hover:from-red-500/30 hover:to-red-600/30 border border-red-400/30 rounded-xl p-4 text-center transition">
+          <Link href="/alerts" className="bg-gradient-to-br from-red-500/20 to-red-600/20 hover:from-red-500/30 hover:to-red-600/30 border border-red-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
             <div className="text-3xl mb-2">🔔</div>
             <div className="font-semibold text-sm">Alerts</div>
           </Link>
         </div>
 
-        {/* AI Pick Groups */}
-        <div className="space-y-8">
-          {Object.entries(aiGroups).map(([aiName, aiPicks]) => (
+        {/* All Picks by AI */}
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold mb-4">All AI Picks</h2>
+          
+          {Object.entries(
+            picks.reduce((acc, pick) => {
+              if (!acc[pick.ai_name]) acc[pick.ai_name] = []
+              acc[pick.ai_name].push(pick)
+              return acc
+            }, {} as Record<string, StockPick[]>)
+          ).map(([aiName, aiPicks]) => (
             <div key={aiName} className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold">{aiName}</h2>
-                <span className="px-4 py-2 bg-brand-cyan/20 text-brand-cyan rounded-full font-semibold">
-                  {aiPicks.length} picks
+                <h3 className="text-2xl font-bold">{aiName}</h3>
+                <span className="px-4 py-2 bg-blue-500/20 text-blue-300 rounded-full font-semibold">
+                  {aiPicks.length} pick{aiPicks.length !== 1 ? 's' : ''}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {aiPicks.slice(0, 9).map((pick) => {
-                  const isExpanded = expandedId === pick.id
+                {aiPicks.slice(0, 6).map((pick) => {
                   const priceData = prices[pick.symbol]
                   const currentPrice = priceData?.price || pick.entry_price
                   const gain = ((currentPrice - pick.entry_price) / pick.entry_price) * 100
-                  const targetGain = ((pick.target_price - pick.entry_price) / pick.entry_price) * 100
                   const isWinning = gain > 0
 
                   return (
                     <Link
                       key={pick.id}
                       href={`/stock/${pick.symbol}`}
-                      className="bg-white/5 rounded-xl p-4 border border-white/10 hover:border-brand-cyan/50 transition group"
+                      className="bg-white/5 rounded-xl p-4 border border-white/10 hover:border-blue-500/50 transition-all hover:scale-105 group"
                     >
                       <div className="flex items-center justify-between mb-3">
-                        <div className="text-2xl font-bold group-hover:text-brand-cyan transition">
+                        <div className="text-2xl font-bold group-hover:text-blue-400 transition">
                           {pick.symbol}
                         </div>
                         <span className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-sm font-semibold">
@@ -276,23 +404,16 @@ export default function DashboardPage() {
                             ${currentPrice.toFixed(2)}
                           </div>
                           <div className={`text-xs ${isWinning ? 'text-green-300' : 'text-red-300'}`}>
-                            {isWinning ? '+' : ''}{gain.toFixed(1)}% (${isWinning ? '+' : ''}{(currentPrice - pick.entry_price).toFixed(2)})
+                            {isWinning ? '+' : ''}{gain.toFixed(1)}%
                           </div>
                         </div>
                         <div>
                           <div className="text-slate-400">Target</div>
                           <div className="font-semibold">${pick.target_price.toFixed(2)}</div>
-                          <div className="text-xs text-blue-300">+{targetGain.toFixed(1)}%</div>
                         </div>
                       </div>
 
-                      {pick.sector && (
-                        <div className="text-xs text-slate-500 mb-2">
-                          {pick.sector} {pick.catalyst && `• ${pick.catalyst}`}
-                        </div>
-                      )}
-
-                      <div className="text-xs text-slate-500 mt-2 group-hover:text-brand-cyan transition">
+                      <div className="text-xs text-blue-300 mt-2 group-hover:text-blue-200 transition">
                         Click for full analysis →
                       </div>
                     </Link>
@@ -300,13 +421,13 @@ export default function DashboardPage() {
                 })}
               </div>
 
-              {aiPicks.length > 9 && (
-                <div className="mt-6 text-center">
+              {aiPicks.length > 6 && (
+                <div className="mt-4 text-center">
                   <Link
-                    href="/hot-picks"
-                    className="inline-block px-6 py-3 bg-brand-cyan/20 hover:bg-brand-cyan/30 text-brand-cyan rounded-lg font-semibold transition border border-brand-cyan/30"
+                    href={`/all-picks?ai=${encodeURIComponent(aiName)}`}
+                    className="inline-block px-6 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-lg font-semibold transition"
                   >
-                    View All {aiPicks.length} Picks →
+                    View All {aiPicks.length} {aiName} Picks →
                   </Link>
                 </div>
               )}
@@ -316,25 +437,24 @@ export default function DashboardPage() {
 
         {/* Additional Features */}
         <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Link href="/insights" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition group">
+          <Link href="/insights" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition-all hover:scale-105 group">
             <div className="text-4xl mb-2">📈</div>
-            <div className="font-semibold group-hover:text-brand-cyan transition">AI Insights</div>
+            <div className="font-semibold group-hover:text-blue-400 transition">AI Insights</div>
           </Link>
-          <Link href="/sectors" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition group">
+          <Link href="/sectors" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition-all hover:scale-105 group">
             <div className="text-4xl mb-2">🏭</div>
-            <div className="font-semibold group-hover:text-brand-cyan transition">Sectors</div>
+            <div className="font-semibold group-hover:text-blue-400 transition">Sectors</div>
           </Link>
-          <Link href="/charts" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition group">
+          <Link href="/charts" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition-all hover:scale-105 group">
             <div className="text-4xl mb-2">📉</div>
-            <div className="font-semibold group-hover:text-brand-cyan transition">Charts</div>
+            <div className="font-semibold group-hover:text-blue-400 transition">Charts</div>
           </Link>
-          <Link href="/export" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition group">
+          <Link href="/export" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition-all hover:scale-105 group">
             <div className="text-4xl mb-2">💾</div>
-            <div className="font-semibold group-hover:text-brand-cyan transition">Export</div>
+            <div className="font-semibold group-hover:text-blue-400 transition">Export</div>
           </Link>
         </div>
       </div>
     </div>
   )
 }
-
