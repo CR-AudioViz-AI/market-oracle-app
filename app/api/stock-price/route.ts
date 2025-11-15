@@ -3,6 +3,10 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 
+// Explicitly mark as dynamic route
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 interface YahooQuoteResponse {
   chart: {
     result: Array<{
@@ -140,4 +144,3 @@ async function getHistoricalPrice(symbol: string, date: string): Promise<number 
     return null
   }
 }
-
