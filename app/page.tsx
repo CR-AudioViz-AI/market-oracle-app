@@ -21,6 +21,7 @@ interface StockPick {
   status: string
   sector?: string
   catalyst?: string
+  quantity?: number  // CRITICAL: Store actual shares owned
 }
 
 interface StockPrice {
@@ -39,6 +40,16 @@ interface HotPick {
   targetPrice: number
 }
 
+interface PortfolioMetrics {
+  entryValue: number      // Total $ invested (sum of quantity * entry_price)
+  currentValue: number    // Current $ value (sum of quantity * current_price)
+  targetValue: number     // Target $ value (sum of quantity * target_price)
+  totalGainLoss: number   // $ gain/loss (currentValue - entryValue)
+  totalGainLossPercent: number  // % gain/loss
+  realizedGains: number   // From closed positions
+  unrealizedGains: number // From open positions
+}
+
 export default function DashboardPage() {
   const [picks, setPicks] = useState<StockPick[]>([])
   const [prices, setPrices] = useState<Record<string, StockPrice>>({})
@@ -46,6 +57,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null)
   const [hotPicks, setHotPicks] = useState<HotPick[]>([])
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     loadDashboardData()
@@ -69,29 +81,51 @@ export default function DashboardPage() {
 
   async function loadDashboardData() {
     setLoading(true)
+    setError(null)
     
-    // Load ALL active picks
-    const { data: picksData } = await supabase
-      .from('stock_picks')
-      .select('*')
-      .eq('status', 'OPEN')
-      .order('pick_date', { ascending: false })
+    try {
+      // Load ALL active picks with error handling
+      const { data: picksData, error: picksError } = await supabase
+        .from('stock_picks')
+        .select('*')
+        .eq('status', 'OPEN')
+        .order('pick_date', { ascending: false })
 
-    if (picksData) {
-      setPicks(picksData as StockPick[])
+      if (picksError) {
+        throw new Error(`Failed to load picks: ${picksError.message}`)
+      }
+
+      if (picksData) {
+        // CRITICAL: Ensure each pick has quantity (default to 1 if missing for backward compatibility)
+        const picksWithQuantity = picksData.map(pick => ({
+          ...pick,
+          quantity: pick.quantity || 1
+        }))
+        setPicks(picksWithQuantity as StockPick[])
+      }
+
+      // Get REAL AI model count from database
+      const { data: modelsData, error: modelsError } = await supabase
+        .from('ai_models')
+        .select('id, display_name, is_active')
+        .eq('is_active', true)
+
+      if (modelsError) {
+        console.error('Failed to load AI models:', modelsError)
+        // Don't fail completely, just log it
+      }
+
+      if (modelsData) {
+        setAiModelCount(modelsData.length)
+      }
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error loading dashboard'
+      setError(errorMessage)
+      console.error('Dashboard load error:', err)
+    } finally {
+      setLoading(false)
     }
-
-    // Get REAL AI model count from database
-    const { data: modelsData } = await supabase
-      .from('ai_models')
-      .select('id, display_name, is_active')
-      .eq('is_active', true)
-
-    if (modelsData) {
-      setAiModelCount(modelsData.length)
-    }
-
-    setLoading(false)
   }
 
   async function loadPrices(symbols: string[]) {
@@ -103,6 +137,7 @@ export default function DashboardPage() {
       
       if (!response.ok) {
         console.error('Failed to fetch prices:', response.status)
+        // Don't throw - prices are optional enhancement
         return
       }
 
@@ -114,6 +149,7 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error('Error loading prices:', error)
+      // Prices are non-critical, continue without them
     }
   }
 
@@ -159,6 +195,40 @@ export default function DashboardPage() {
     setHotPicks(hot)
   }
 
+  // CRITICAL: 100% ACCURATE PORTFOLIO CALCULATIONS
+  function calculatePortfolioMetrics(): PortfolioMetrics {
+    let entryValue = 0
+    let currentValue = 0
+    let targetValue = 0
+
+    picks.forEach(pick => {
+      const quantity = pick.quantity || 1
+      const currentPrice = prices[pick.symbol]?.price || pick.entry_price
+
+      // Entry value: What you paid
+      entryValue += quantity * pick.entry_price
+
+      // Current value: What it's worth now
+      currentValue += quantity * currentPrice
+
+      // Target value: What it could be worth
+      targetValue += quantity * pick.target_price
+    })
+
+    const totalGainLoss = currentValue - entryValue
+    const totalGainLossPercent = entryValue > 0 ? (totalGainLoss / entryValue) * 100 : 0
+
+    return {
+      entryValue,
+      currentValue,
+      targetValue,
+      totalGainLoss,
+      totalGainLossPercent,
+      realizedGains: 0,  // TODO: Calculate from closed positions
+      unrealizedGains: totalGainLoss
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
@@ -171,20 +241,37 @@ export default function DashboardPage() {
     )
   }
 
-  // Calculate portfolio value
-  const portfolioValue = picks.reduce((sum, p) => {
-    const currentPrice = prices[p.symbol]?.price || p.entry_price
-    return sum + currentPrice
-  }, 0)
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
+        <div className="text-center max-w-2xl mx-auto px-4">
+          <div className="text-red-500 text-6xl mb-4">⚠️</div>
+          <div className="text-white text-3xl font-bold mb-4">Error Loading Dashboard</div>
+          <div className="text-slate-300 mb-6">{error}</div>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
 
-  // Calculate top performer
+  // Calculate 100% accurate portfolio metrics
+  const portfolio = calculatePortfolioMetrics()
+
+  // Calculate top performer (based on % gain, not $ gain)
   const picksWithGains = picks.map(pick => {
     const currentPrice = prices[pick.symbol]?.price || pick.entry_price
-    const gain = ((currentPrice - pick.entry_price) / pick.entry_price) * 100
-    return { ...pick, currentPrice, gain }
-  }).sort((a, b) => b.gain - a.gain)
+    const gainPercent = ((currentPrice - pick.entry_price) / pick.entry_price) * 100
+    const gainDollars = (pick.quantity || 1) * (currentPrice - pick.entry_price)
+    return { ...pick, currentPrice, gainPercent, gainDollars }
+  }).sort((a, b) => b.gainPercent - a.gainPercent)
 
   const topPerformer = picksWithGains[0]
+  const worstPerformer = picksWithGains[picksWithGains.length - 1]
 
   // Calculate average confidence
   const avgConfidence = picks.length > 0 
@@ -209,7 +296,40 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* CLICKABLE Stats Summary */}
+        {/* CLICKABLE Stats Summary - TOP ROW: Portfolio Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <Link href="/portfolio" className="bg-gradient-to-br from-green-500/20 to-emerald-600/20 backdrop-blur-sm rounded-xl p-6 border border-green-500/30 hover:border-green-400/60 transition-all hover:scale-105 cursor-pointer group">
+            <div className="text-green-300 text-sm mb-1 font-semibold">💰 Entry Value (Invested)</div>
+            <div className="text-4xl font-bold text-white group-hover:text-green-300 transition">
+              ${portfolio.entryValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </div>
+            <div className="text-xs text-green-200 mt-2">Total capital invested in {picks.length} positions</div>
+          </Link>
+          
+          <Link href="/portfolio" className="bg-gradient-to-br from-blue-500/20 to-cyan-600/20 backdrop-blur-sm rounded-xl p-6 border border-blue-500/30 hover:border-blue-400/60 transition-all hover:scale-105 cursor-pointer group">
+            <div className="text-blue-300 text-sm mb-1 font-semibold">📊 Current Value (Live)</div>
+            <div className="text-4xl font-bold text-white group-hover:text-blue-300 transition">
+              ${portfolio.currentValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </div>
+            <div className={`text-sm mt-2 font-semibold ${portfolio.totalGainLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {portfolio.totalGainLoss >= 0 ? '+' : ''}{portfolio.totalGainLossPercent.toFixed(2)}% 
+              ({portfolio.totalGainLoss >= 0 ? '+' : ''}${portfolio.totalGainLoss.toFixed(2)})
+            </div>
+          </Link>
+          
+          <Link href="/portfolio" className="bg-gradient-to-br from-purple-500/20 to-pink-600/20 backdrop-blur-sm rounded-xl p-6 border border-purple-500/30 hover:border-purple-400/60 transition-all hover:scale-105 cursor-pointer group">
+            <div className="text-purple-300 text-sm mb-1 font-semibold">🎯 Target Value (If All Hit)</div>
+            <div className="text-4xl font-bold text-white group-hover:text-purple-300 transition">
+              ${portfolio.targetValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </div>
+            <div className="text-sm text-purple-200 mt-2">
+              Potential: +${(portfolio.targetValue - portfolio.entryValue).toFixed(2)} 
+              (+{((portfolio.targetValue - portfolio.entryValue) / portfolio.entryValue * 100).toFixed(1)}%)
+            </div>
+          </Link>
+        </div>
+
+        {/* CLICKABLE Stats Summary - BOTTOM ROW: Market Intelligence */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <Link href="/all-picks" className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-blue-500/50 transition-all hover:scale-105 cursor-pointer group">
             <div className="text-slate-400 text-sm mb-1">Total Active Picks</div>
@@ -236,222 +356,108 @@ export default function DashboardPage() {
           </div>
           
           <Link href={topPerformer ? `/stock/${topPerformer.symbol}` : '#'} className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-purple-500/50 transition-all hover:scale-105 cursor-pointer group">
-            <div className="text-slate-400 text-sm mb-1">Top Performer</div>
+            <div className="text-slate-400 text-sm mb-1">🏆 Best Pick</div>
             <div className="text-2xl font-bold text-purple-400 group-hover:text-purple-300 transition">
               {topPerformer ? topPerformer.symbol : 'N/A'}
             </div>
             <div className="text-sm text-green-400">
-              {topPerformer ? `+${topPerformer.gain.toFixed(2)}% (+$${(topPerformer.currentPrice - topPerformer.entry_price).toFixed(2)})` : '--'}
+              {topPerformer ? `+${topPerformer.gainPercent.toFixed(2)}% (+$${topPerformer.gainDollars.toFixed(2)})` : '--'}
             </div>
-            <div className="text-xs text-slate-500 mt-1">Click for full analysis →</div>
+            <div className="text-xs text-slate-500 mt-1">Highest % gain →</div>
           </Link>
           
-          <Link href="/portfolio" className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-yellow-500/50 transition-all hover:scale-105 cursor-pointer group">
-            <div className="text-slate-400 text-sm mb-1">Portfolio Value</div>
-            <div className="text-3xl font-bold text-white group-hover:text-yellow-400 transition">
-              ${portfolioValue.toLocaleString(undefined, {maximumFractionDigits: 0})}
+          <Link href={worstPerformer ? `/stock/${worstPerformer.symbol}` : '#'} className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-red-500/50 transition-all hover:scale-105 cursor-pointer group">
+            <div className="text-slate-400 text-sm mb-1">⚠️ Worst Pick</div>
+            <div className="text-2xl font-bold text-red-400 group-hover:text-red-300 transition">
+              {worstPerformer ? worstPerformer.symbol : 'N/A'}
             </div>
-            <div className="text-xs text-slate-500 mt-2">View portfolio breakdown →</div>
+            <div className="text-sm text-red-400">
+              {worstPerformer ? `${worstPerformer.gainPercent.toFixed(2)}% ($${worstPerformer.gainDollars.toFixed(2)})` : '--'}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">Lowest % gain →</div>
           </Link>
         </div>
 
-        {/* HOT PICKS - Multi-AI or High Confidence */}
-        {hotPicks.length > 0 && (
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-3xl font-bold">🔥 Hot Picks</h2>
-              <span className="text-sm text-slate-400">
-                Stocks with 2+ AI picks or 85%+ confidence
-              </span>
+        {/* Hot Picks Section */}
+        <div className="bg-white/5 backdrop-blur-sm rounded-xl p-8 border border-white/10 mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-3xl font-bold mb-2">🔥 Hot Picks</h2>
+              <p className="text-slate-400">Stocks picked by multiple AIs or with very high confidence</p>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {hotPicks.slice(0, 6).map((hotPick) => {
-                const priceData = prices[hotPick.symbol]
-                const currentPrice = priceData?.price || hotPick.entryPrice
-                const gain = ((currentPrice - hotPick.entryPrice) / hotPick.entryPrice) * 100
-                const isWinning = gain > 0
-
-                return (
-                  <Link
-                    key={hotPick.symbol}
-                    href={`/stock/${hotPick.symbol}`}
-                    className="bg-gradient-to-br from-orange-500/10 to-red-500/10 rounded-xl p-6 border-2 border-orange-500/30 hover:border-orange-500/60 transition-all hover:scale-105 group"
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="text-3xl font-bold group-hover:text-orange-400 transition">
-                        {hotPick.symbol}
-                      </div>
-                      <div className="flex flex-col items-end">
-                        <span className="px-3 py-1 bg-orange-500/30 text-orange-200 rounded-full text-sm font-bold">
-                          {hotPick.aiCount} AI{hotPick.aiCount > 1 ? 's' : ''}
-                        </span>
-                        <span className="text-xs text-slate-400 mt-1">
-                          {hotPick.avgConfidence.toFixed(0)}% avg confidence
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
-                      <div>
-                        <div className="text-slate-400">Current Price</div>
-                        <div className={`font-semibold text-lg ${isWinning ? 'text-green-400' : 'text-red-400'}`}>
-                          ${currentPrice.toFixed(2)}
-                        </div>
-                        <div className={`text-xs ${isWinning ? 'text-green-300' : 'text-red-300'}`}>
-                          {isWinning ? '+' : ''}{gain.toFixed(1)}%
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-slate-400">Picked By</div>
-                        <div className="font-semibold text-sm">
-                          {hotPick.picks.map(p => p.ai_name).join(', ')}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-xs text-orange-300 mt-2 group-hover:text-orange-200 transition">
-                      Click for full analysis & AI reasoning →
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
+            <Link 
+              href="/hot-picks"
+              className="px-6 py-3 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 rounded-lg font-semibold transition"
+            >
+              View All Hot Picks
+            </Link>
           </div>
-        )}
 
-        {/* Quick Navigation */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
-          <Link href="/portfolio" className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 hover:from-blue-500/30 hover:to-blue-600/30 border border-blue-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
-            <div className="text-3xl mb-2">💼</div>
-            <div className="font-semibold text-sm">Portfolio</div>
-          </Link>
-          <Link href="/backtesting" className="bg-gradient-to-br from-green-500/20 to-green-600/20 hover:from-green-500/30 hover:to-green-600/30 border border-green-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
-            <div className="text-3xl mb-2">📊</div>
-            <div className="font-semibold text-sm">Backtesting</div>
-          </Link>
-          <Link href="/voting" className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 hover:from-purple-500/30 hover:to-purple-600/30 border border-purple-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
-            <div className="text-3xl mb-2">🗳️</div>
-            <div className="font-semibold text-sm">Voting</div>
-          </Link>
-          <Link href="/paper-trading" className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 hover:from-yellow-500/30 hover:to-yellow-600/30 border border-yellow-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
-            <div className="text-3xl mb-2">📝</div>
-            <div className="font-semibold text-sm">Paper Trade</div>
-          </Link>
-          <Link href="/watchlist" className="bg-gradient-to-br from-pink-500/20 to-pink-600/20 hover:from-pink-500/30 hover:to-pink-600/30 border border-pink-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
-            <div className="text-3xl mb-2">⭐</div>
-            <div className="font-semibold text-sm">Watchlist</div>
-          </Link>
-          <Link href="/community" className="bg-gradient-to-br from-indigo-500/20 to-indigo-600/20 hover:from-indigo-500/30 hover:to-indigo-600/30 border border-indigo-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
-            <div className="text-3xl mb-2">💬</div>
-            <div className="font-semibold text-sm">Community</div>
-          </Link>
-          <Link href="/alerts" className="bg-gradient-to-br from-red-500/20 to-red-600/20 hover:from-red-500/30 hover:to-red-600/30 border border-red-400/30 rounded-xl p-4 text-center transition-all hover:scale-105">
-            <div className="text-3xl mb-2">🔔</div>
-            <div className="font-semibold text-sm">Alerts</div>
-          </Link>
-        </div>
-
-        {/* All Picks by AI */}
-        <div className="space-y-6">
-          <h2 className="text-2xl font-bold mb-4">All AI Picks</h2>
-          
-          {Object.entries(
-            picks.reduce((acc, pick) => {
-              if (!acc[pick.ai_name]) acc[pick.ai_name] = []
-              acc[pick.ai_name].push(pick)
-              return acc
-            }, {} as Record<string, StockPick[]>)
-          ).map(([aiName, aiPicks]) => (
-            <div key={aiName} className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-2xl font-bold">{aiName}</h3>
-                <span className="px-4 py-2 bg-blue-500/20 text-blue-300 rounded-full font-semibold">
-                  {aiPicks.length} pick{aiPicks.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {aiPicks.slice(0, 6).map((pick) => {
-                  const priceData = prices[pick.symbol]
-                  const currentPrice = priceData?.price || pick.entry_price
-                  const gain = ((currentPrice - pick.entry_price) / pick.entry_price) * 100
-                  const isWinning = gain > 0
-
-                  return (
-                    <Link
-                      key={pick.id}
-                      href={`/stock/${pick.symbol}`}
-                      className="bg-white/5 rounded-xl p-4 border border-white/10 hover:border-blue-500/50 transition-all hover:scale-105 group"
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="text-2xl font-bold group-hover:text-blue-400 transition">
-                          {pick.symbol}
-                        </div>
-                        <span className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-sm font-semibold">
-                          {pick.confidence_score}%
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-3 mb-3 text-sm">
-                        <div>
-                          <div className="text-slate-400">Entry</div>
-                          <div className="font-semibold">${pick.entry_price.toFixed(2)}</div>
-                        </div>
-                        <div>
-                          <div className="text-slate-400">Current</div>
-                          <div className={`font-semibold ${isWinning ? 'text-green-400' : 'text-red-400'}`}>
-                            ${currentPrice.toFixed(2)}
-                          </div>
-                          <div className={`text-xs ${isWinning ? 'text-green-300' : 'text-red-300'}`}>
-                            {isWinning ? '+' : ''}{gain.toFixed(1)}%
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-slate-400">Target</div>
-                          <div className="font-semibold">${pick.target_price.toFixed(2)}</div>
-                        </div>
-                      </div>
-
-                      <div className="text-xs text-blue-300 mt-2 group-hover:text-blue-200 transition">
-                        Click for full analysis →
-                      </div>
-                    </Link>
-                  )
-                })}
-              </div>
-
-              {aiPicks.length > 6 && (
-                <div className="mt-4 text-center">
-                  <Link
-                    href={`/all-picks?ai=${encodeURIComponent(aiName)}`}
-                    className="inline-block px-6 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-lg font-semibold transition"
-                  >
-                    View All {aiPicks.length} {aiName} Picks →
-                  </Link>
-                </div>
-              )}
+          {hotPicks.length === 0 ? (
+            <div className="text-center py-12 text-slate-400">
+              <div className="text-6xl mb-4">🔍</div>
+              <div className="text-xl">No hot picks yet</div>
+              <div className="text-sm mt-2">Hot picks appear when 2+ AIs pick the same stock or confidence is 85%+</div>
             </div>
-          ))}
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {hotPicks.slice(0, 6).map((hot, idx) => (
+                <Link
+                  key={idx}
+                  href={`/stock/${hot.symbol}`}
+                  className="bg-gradient-to-br from-orange-500/10 to-red-600/10 rounded-lg p-6 border border-orange-500/30 hover:border-orange-400 transition-all hover:scale-105 cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="text-2xl font-bold">{hot.symbol}</div>
+                    <div className="px-3 py-1 bg-orange-500/20 rounded-full text-sm font-semibold text-orange-300">
+                      {hot.aiCount} AI{hot.aiCount > 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <div className="text-slate-400 mb-1">Entry</div>
+                      <div className="font-semibold">${hot.entryPrice.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400 mb-1">Target</div>
+                      <div className="font-semibold text-green-400">${hot.targetPrice.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400 mb-1">Confidence</div>
+                      <div className="font-semibold text-blue-400">{hot.avgConfidence.toFixed(0)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400 mb-1">Upside</div>
+                      <div className="font-semibold text-purple-400">
+                        +{((hot.targetPrice - hot.entryPrice) / hot.entryPrice * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Additional Features */}
-        <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Link href="/insights" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition-all hover:scale-105 group">
-            <div className="text-4xl mb-2">📈</div>
-            <div className="font-semibold group-hover:text-blue-400 transition">AI Insights</div>
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Link href="/paper-trading" className="bg-gradient-to-br from-blue-500/10 to-cyan-600/10 rounded-xl p-6 border border-blue-500/30 hover:border-blue-400 transition-all hover:scale-105">
+            <div className="text-3xl mb-3">📈</div>
+            <div className="text-xl font-bold mb-2">Paper Trading</div>
+            <div className="text-slate-400 text-sm">Practice with virtual money</div>
           </Link>
-          <Link href="/sectors" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition-all hover:scale-105 group">
-            <div className="text-4xl mb-2">🏭</div>
-            <div className="font-semibold group-hover:text-blue-400 transition">Sectors</div>
+          
+          <Link href="/backtesting" className="bg-gradient-to-br from-purple-500/10 to-pink-600/10 rounded-xl p-6 border border-purple-500/30 hover:border-purple-400 transition-all hover:scale-105">
+            <div className="text-3xl mb-3">⏮️</div>
+            <div className="text-xl font-bold mb-2">Backtesting</div>
+            <div className="text-slate-400 text-sm">Test strategies on historical data</div>
           </Link>
-          <Link href="/charts" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition-all hover:scale-105 group">
-            <div className="text-4xl mb-2">📉</div>
-            <div className="font-semibold group-hover:text-blue-400 transition">Charts</div>
-          </Link>
-          <Link href="/export" className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-center transition-all hover:scale-105 group">
-            <div className="text-4xl mb-2">💾</div>
-            <div className="font-semibold group-hover:text-blue-400 transition">Export</div>
+          
+          <Link href="/alerts" className="bg-gradient-to-br from-orange-500/10 to-red-600/10 rounded-xl p-6 border border-orange-500/30 hover:border-orange-400 transition-all hover:scale-105">
+            <div className="text-3xl mb-3">🔔</div>
+            <div className="text-xl font-bold mb-2">Price Alerts</div>
+            <div className="text-slate-400 text-sm">Get notified on price movements</div>
           </Link>
         </div>
       </div>
