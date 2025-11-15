@@ -638,7 +638,7 @@ export default function BacktestingPage() {
                 <div className="text-lg font-bold mb-4 text-green-300">🏆 Best Trade</div>
                 <div className="text-3xl font-bold mb-2">{result.bestTrade.symbol}</div>
                 <div className="text-2xl font-bold text-green-400">
-                  +${result.bestTrade.gain.toFixed(2)} (+{result.bestTrade.gainPercent.toFixed(1)}%)
+                  +${result.bestTrade.gainLoss.toFixed(2)} (+{result.bestTrade.gainLossPercent.toFixed(1)}%)
                 </div>
               </div>
 
@@ -646,7 +646,7 @@ export default function BacktestingPage() {
                 <div className="text-lg font-bold mb-4 text-red-300">⚠️ Worst Trade</div>
                 <div className="text-3xl font-bold mb-2">{result.worstTrade.symbol}</div>
                 <div className="text-2xl font-bold text-red-400">
-                  ${result.worstTrade.gain.toFixed(2)} ({result.worstTrade.gainPercent.toFixed(1)}%)
+                  ${result.worstTrade.gainLoss.toFixed(2)} ({result.worstTrade.gainLossPercent.toFixed(1)}%)
                 </div>
               </div>
             </div>
