@@ -318,8 +318,8 @@ export default function BacktestingPage() {
 
       // Find best and worst trades
       const sortedByGain = completedTrades.sort((a, b) => b.gainLossPercent - a.gainLossPercent)
-      const bestTrade = sortedByGain[0] || { symbol: 'N/A', gain: 0, gainPercent: 0 }
-      const worstTrade = sortedByGain[sortedByGain.length - 1] || { symbol: 'N/A', gain: 0, gainPercent: 0 }
+      const bestTrade = sortedByGain[0] || { symbol: 'N/A', gainLoss: 0, gainLossPercent: 0, entryPrice: 0, exitPrice: 0, shares: 0, entryValue: 0, exitValue: 0, entryDate: '', exitDate: null, aiName: '', confidence: 0 }
+      const worstTrade = sortedByGain[sortedByGain.length - 1] || { symbol: 'N/A', gainLoss: 0, gainLossPercent: 0, entryPrice: 0, exitPrice: 0, shares: 0, entryValue: 0, exitValue: 0, entryDate: '', exitDate: null, aiName: '', confidence: 0 }
 
       setResult({
         totalTrades: filteredPicks.length,
