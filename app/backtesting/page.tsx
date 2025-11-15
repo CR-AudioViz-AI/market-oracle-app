@@ -68,6 +68,7 @@ interface StockPick {
   symbol: string
   ai_name: string
   entry_price: number
+  target_price: number
   exit_price: number | null
   confidence_score: number
   pick_date: string
