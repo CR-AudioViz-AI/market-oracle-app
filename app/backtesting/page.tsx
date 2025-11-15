@@ -31,8 +31,8 @@ interface BacktestResult {
   totalReturnPercent: number
   averageGain: number
   averageLoss: number
-  bestTrade: { symbol: string; gain: number; gainPercent: number }
-  worstTrade: { symbol: string; gain: number; gainPercent: number }
+  bestTrade: { symbol: string; gainLoss: number; gainLossPercent: number }
+  worstTrade: { symbol: string; gainLoss: number; gainLossPercent: number }
   sharpeRatio: number
   maxDrawdown: number
   finalPortfolioValue: number
@@ -333,13 +333,13 @@ export default function BacktestingPage() {
         averageLoss,
         bestTrade: {
           symbol: bestTrade.symbol,
-          gain: bestTrade.gainLoss || 0,
-          gainPercent: bestTrade.gainLossPercent || 0
+          gainLoss: bestTrade.gainLoss || 0,
+          gainLossPercent: bestTrade.gainLossPercent || 0
         },
         worstTrade: {
           symbol: worstTrade.symbol,
-          gain: worstTrade.gainLoss || 0,
-          gainPercent: worstTrade.gainLossPercent || 0
+          gainLoss: worstTrade.gainLoss || 0,
+          gainLossPercent: worstTrade.gainLossPercent || 0
         },
         sharpeRatio,
         maxDrawdown: maxDrawdown * 100,
