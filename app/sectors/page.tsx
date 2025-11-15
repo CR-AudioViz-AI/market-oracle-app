@@ -258,7 +258,7 @@ export default function SectorsPage() {
                 Having too many picks in one sector increases risk if that sector underperforms.
               </p>
               <div className="text-xs text-slate-400">
-                <strong>Warning:</strong> If >40% of picks are in one sector, consider diversifying.
+                <strong>Warning:</strong> If {'>'}40% of picks are in one sector, consider diversifying.
               </div>
             </div>
 
