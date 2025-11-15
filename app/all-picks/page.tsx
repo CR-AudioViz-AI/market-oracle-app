@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
@@ -23,7 +23,8 @@ interface StockPick {
   sector?: string
 }
 
-export default function AllPicksPage() {
+// Separate component for content that uses useSearchParams
+function AllPicksContent() {
   const searchParams = useSearchParams()
   const aiFilter = searchParams.get('ai')
 
@@ -98,19 +99,24 @@ export default function AllPicksPage() {
           <div>
             <label className="text-sm text-slate-400 mb-2 block">Status</label>
             <div className="flex gap-2">
-              {(['OPEN', 'CLOSED', 'all'] as const).map(status => (
-                <button
-                  key={status}
-                  onClick={() => setFilterStatus(status)}
-                  className={`px-4 py-2 rounded-lg font-semibold transition ${
-                    filterStatus === status
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-white/5 text-slate-400 hover:bg-white/10'
-                  }`}
-                >
-                  {status === 'all' ? 'All' : status}
-                </button>
-              ))}
+              <button
+                onClick={() => setFilterStatus('all')}
+                className={`px-4 py-2 rounded ${filterStatus === 'all' ? 'bg-blue-600' : 'bg-slate-800'}`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setFilterStatus('OPEN')}
+                className={`px-4 py-2 rounded ${filterStatus === 'OPEN' ? 'bg-blue-600' : 'bg-slate-800'}`}
+              >
+                Open
+              </button>
+              <button
+                onClick={() => setFilterStatus('CLOSED')}
+                className={`px-4 py-2 rounded ${filterStatus === 'CLOSED' ? 'bg-blue-600' : 'bg-slate-800'}`}
+              >
+                Closed
+              </button>
             </div>
           </div>
 
@@ -118,8 +124,8 @@ export default function AllPicksPage() {
             <label className="text-sm text-slate-400 mb-2 block">Sort By</label>
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white"
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              className="px-4 py-2 rounded bg-slate-800 text-white"
             >
               <option value="date">Date</option>
               <option value="confidence">Confidence</option>
@@ -129,53 +135,74 @@ export default function AllPicksPage() {
         </div>
 
         {/* Picks Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sortedPicks.map((pick) => (
-            <Link
-              key={pick.id}
-              href={`/stock/${pick.symbol}`}
-              className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-blue-500/50 transition group"
-            >
-              <div className="flex items-center justify-between mb-4">
+            <div key={pick.id} className="bg-slate-900 rounded-lg p-6 border border-slate-800">
+              <div className="flex items-start justify-between mb-4">
                 <div>
-                  <div className="text-2xl font-bold group-hover:text-blue-400 transition">
-                    {pick.symbol}
-                  </div>
-                  <div className="text-sm text-slate-400">{pick.ai_name}</div>
+                  <h3 className="text-2xl font-bold text-blue-400">{pick.symbol}</h3>
+                  <p className="text-sm text-slate-400">{pick.ai_name}</p>
                 </div>
-                <span className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-sm font-semibold">
-                  {pick.confidence_score}%
+                <span className={`px-3 py-1 rounded text-sm ${
+                  pick.status === 'OPEN' ? 'bg-green-600' : 'bg-slate-600'
+                }`}>
+                  {pick.status}
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-3 text-sm">
-                <div>
-                  <div className="text-slate-400">Entry</div>
-                  <div className="font-semibold">${pick.entry_price.toFixed(2)}</div>
+              <div className="space-y-2 mb-4">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Entry:</span>
+                  <span className="font-mono">${pick.entry_price.toFixed(2)}</span>
                 </div>
-                <div>
-                  <div className="text-slate-400">Target</div>
-                  <div className="font-semibold">${pick.target_price.toFixed(2)}</div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Target:</span>
+                  <span className="font-mono text-green-400">${pick.target_price.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Upside:</span>
+                  <span className="font-mono text-green-400">
+                    {((pick.target_price - pick.entry_price) / pick.entry_price * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Confidence:</span>
+                  <span className="font-mono">{pick.confidence_score}%</span>
                 </div>
               </div>
 
-              {pick.sector && (
-                <div className="text-xs text-slate-500 mb-3">
-                  Sector: {pick.sector}
-                </div>
-              )}
-
-              <div className="text-xs text-slate-400">
-                {new Date(pick.pick_date).toLocaleDateString()}
+              <div className="mb-4">
+                <p className="text-sm text-slate-400 mb-1">Reasoning:</p>
+                <p className="text-sm text-slate-300 line-clamp-3">{pick.reasoning}</p>
               </div>
 
-              <div className="text-xs text-blue-300 mt-3 group-hover:text-blue-200 transition">
-                View full analysis →
+              <div className="flex justify-between items-center text-xs text-slate-500">
+                <span>{new Date(pick.pick_date).toLocaleDateString()}</span>
+                {pick.sector && <span>{pick.sector}</span>}
               </div>
-            </Link>
+            </div>
           ))}
         </div>
+
+        {picks.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-slate-400 text-xl">No picks found</p>
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+// Main component with Suspense wrapper
+export default function AllPicksPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
+        <div className="text-white text-2xl">Loading picks...</div>
+      </div>
+    }>
+      <AllPicksContent />
+    </Suspense>
   )
 }
